@@ -1427,16 +1427,10 @@ async function gistSave() {
   }
 }
 
-// On startup: fetch Gist, compare timestamps, prompt if remote is newer
+// On startup: fetch Gist, compare timestamps, prompt if remote is newer. NEVER push on startup.
 async function gistCheckOnStartup() {
   const cfg = gistGetConfig();
-  if (!cfg?.pat || !cfg?.gistId) {
-    // No Gist yet — push local data to create it
-    if (cfg?.pat && (state.users.length > 0 || state.measures.length > 0)) {
-      await gistSave();
-    }
-    return;
-  }
+  if (!cfg?.pat || !cfg?.gistId) return; // No Gist configured yet — first push happens on first real change
   try {
     const resp = await fetch(`https://api.github.com/gists/${cfg.gistId}`, {
       headers: { 'Authorization': `Bearer ${cfg.pat}`, 'Accept': 'application/vnd.github+json' }
@@ -1444,25 +1438,20 @@ async function gistCheckOnStartup() {
     if (!resp.ok) return;
     const data = await resp.json();
     const file = data.files?.[GIST_FILENAME];
-    if (!file) { await gistSave(); return; } // Gist exists but no file yet
+    if (!file) return; // Gist exists but no file yet — will be created on next real change
     let content = file.content;
     if (file.truncated) { const raw = await fetch(file.raw_url); content = await raw.text(); }
     const remote = JSON.parse(content);
-    if (!remote.users || !remote.measures) return;
+    if (!remote.users || !remote.measures || !remote._syncedAt) return;
 
-    const remoteSyncedAt = remote._syncedAt ? new Date(remote._syncedAt) : null;
-    const localSyncedAt = localStorage.getItem('gist_last_sync')
-      ? new Date(localStorage.getItem('gist_last_sync_iso')) : null;
+    const remoteSyncedAt = new Date(remote._syncedAt);
+    const localIso = localStorage.getItem('gist_last_sync_iso');
+    const localSyncedAt = localIso ? new Date(localIso) : null;
 
-    const remoteIsNewer = remoteSyncedAt && (!localSyncedAt || remoteSyncedAt > localSyncedAt);
-
-    if (remoteIsNewer) {
-      // Show update popup
+    if (!localSyncedAt || remoteSyncedAt > localSyncedAt) {
       showGistUpdatePrompt(remote, remoteSyncedAt);
-    } else {
-      // Local is up to date, push any local changes silently
-      await gistSave();
     }
+    // If local is up to date: do nothing. Push only happens on real user changes.
   } catch(e) {
     // Silently ignore network errors on startup
   }
@@ -1504,6 +1493,7 @@ function showGistUpdatePrompt(remote, remoteSyncedAt) {
 function gistKeepLocal() {
   document.getElementById('gistUpdatePrompt').style.display = 'none';
   _pendingRemote = null;
+  // Mark local as the authoritative version by pushing it to Gist
   gistSave();
 }
 
@@ -1515,8 +1505,9 @@ async function gistApplyRemote() {
   state.users = remote.users;
   state.measures = remote.measures;
   localStorage.setItem('croissance_v2', JSON.stringify({ ...state }));
-  if (remote._syncedAt) localStorage.setItem('gist_last_sync_iso', remote._syncedAt);
-  localStorage.setItem('gist_last_sync', new Date(remote._syncedAt || Date.now()).toLocaleString('fr-FR'));
+  const syncIso = remote._syncedAt || new Date().toISOString();
+  localStorage.setItem('gist_last_sync_iso', syncIso);
+  localStorage.setItem('gist_last_sync', new Date(syncIso).toLocaleString('fr-FR'));
   renderUsers();
   renderMeasuresTable();
   updateChart();
