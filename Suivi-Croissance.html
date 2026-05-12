@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carnet de Croissance</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f0e8;
+    --surface: #fffdf7;
+    --surface2: #f0ebe0;
+    --border: #d8cdb8;
+    --text: #2a1f0e;
+    --text2: #6b5c42;
+    --accent: #3d6b4f;
+    --accent2: #8b4513;
+    --red: #c0392b;
+    --blue: #2471a3;
+    --shadow: 0 2px 12px rgba(42,31,14,0.08);
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.6rem;
+    color: var(--accent);
+    flex: 1;
+  }
+  header .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn:hover { background: var(--surface2); border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn.primary:hover { background: #2e5240; }
+  .btn.danger { background: var(--red); color: white; border-color: var(--red); }
+  .btn.small { padding: 5px 10px; font-size: 0.78rem; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 65px);
+    overflow: hidden;
+  }
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    height: calc(100vh - 65px);
+    position: sticky;
+    top: 65px;
+  }
+  .main {
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow-x: hidden;
+    min-width: 0;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+  .card h2 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.1rem;
+    margin-bottom: 14px;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .form-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+  .form-row label { font-size: 0.8rem; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: 0.04em; }
+  .form-row input, .form-row select {
+    padding: 8px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    color: var(--text);
+    width: 100%;
+    transition: border-color 0.15s;
+  }
+  .form-row input:focus, .form-row select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .form-row input[type="color"] {
+    padding: 2px 4px;
+    height: 38px;
+    cursor: pointer;
+  }
+
+  .user-list { display: flex; flex-direction: column; gap: 8px; }
+  .user-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1.5px solid var(--border);
+    background: var(--bg);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .user-item:hover { border-color: var(--accent); }
+  .user-item.active { border-color: var(--accent); background: #eef5f1; }
+  .user-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+  .user-name { font-weight: 500; font-size: 0.9rem; flex: 1; }
+  .user-sub { font-size: 0.75rem; color: var(--text2); }
+  .user-actions { display: flex; gap: 4px; }
+
+  .chart-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .toggle-group { display: flex; gap: 6px; }
+  .toggle {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .toggle.active-m { background: #dbeafe; border-color: var(--blue); color: var(--blue); }
+  .toggle.active-f { background: #fce4ec; border-color: #c2185b; color: #c2185b; }
+
+  .chart-wrap {
+    position: relative;
+    width: 100%;
+    height: clamp(280px, 45vw, 560px);
+  }
+
+  .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .measures-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; min-width: 520px; }
+  .measures-table th {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 2px solid var(--border);
+    font-weight: 600;
+    color: var(--text2);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .measures-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .measures-table tr:hover td { background: var(--bg); }
+
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 500;
+  }
+
+  .modal-bg {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 28px;
+    width: 420px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+  }
+  .modal h3 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 18px;
+    color: var(--accent);
+  }
+  .modal-actions { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px,1fr)); gap: 12px; margin-bottom: 8px; }
+  .stat-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+  .stat-val { font-family: 'DM Serif Display', serif; font-size: 1.6rem; color: var(--accent); }
+  .stat-label { font-size: 0.75rem; color: var(--text2); margin-top: 2px; }
+
+  .projection-note {
+    font-size: 0.8rem;
+    color: var(--text2);
+    font-style: italic;
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: var(--bg);
+    border-radius: 6px;
+    border-left: 3px solid var(--accent);
+  }
+
+  @media (max-width: 1024px) {
+    .layout { grid-template-columns: 260px 1fr; }
+  }
+
+  @media (max-width: 768px) {
+    .layout { grid-template-columns: 1fr; height: auto; }
+    .sidebar {
+      height: auto;
+      position: static;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .main { padding: 16px; gap: 16px; }
+    .chart-wrap { height: clamp(240px, 60vw, 380px); }
+    header { padding: 12px 16px; }
+    header h1 { font-size: 1.2rem; }
+    .btn { padding: 7px 12px; font-size: 0.8rem; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  @media (max-width: 480px) {
+    .main { padding: 12px; gap: 12px; }
+    .card { padding: 14px; }
+    header .btn-group { gap: 6px; }
+    .btn { padding: 6px 10px; font-size: 0.78rem; }
+    .chart-wrap { height: clamp(220px, 70vw, 320px); }
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 40px;
+    color: var(--text2);
+    font-size: 0.9rem;
+  }
+  .empty-state .icon { font-size: 2.5rem; margin-bottom: 12px; }
+
+  .divider { height: 1px; background: var(--border); margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📏 Carnet de Croissance</h1>
+  <div class="btn-group">
+    <button class="btn" onclick="openAddMeasure()">➕ Mesure</button>
+    <button class="btn" onclick="openAddUser()">👤 Utilisateur</button>
+    <button class="btn" onclick="exportData()">⬇ Exporter données</button>
+    <button class="btn" onclick="exportChart()">🖼 Exporter graphique</button>
+    <label class="btn" style="cursor:pointer">⬆ Importer données<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="card" style="padding:16px">
+      <h2>👥 Utilisateurs</h2>
+      <div class="user-list" id="userList"></div>
+      <button class="btn primary" style="width:100%;margin-top:12px" onclick="openAddUser()">+ Ajouter</button>
+    </div>
+
+    <div class="card" style="padding:16px">
+      <h2>📊 Référence</h2>
+      <div style="font-size:0.82rem;color:var(--text2);margin-bottom:10px">Courbes CIE-INSERM (M. Sempé)</div>
+      <div class="toggle-group" style="flex-wrap:wrap;gap:6px">
+        <button class="toggle" id="toggleM" onclick="toggleRef('m')">♂ Garçon</button>
+        <button class="toggle" id="toggleF" onclick="toggleRef('f')">♀ Fille</button>
+      </div>
+      <div style="margin-top:10px;font-size:0.78rem;color:var(--text2)">
+        Centiles affichés : 3, 10, 25, 50, 75, 90, 97
+      </div>
+    </div>
+
+    <div class="card" style="padding:16px" id="statsCard">
+      <h2>📈 Statistiques</h2>
+      <div id="statsContent"><div class="empty-state" style="padding:16px"><div>Sélectionnez un utilisateur</div></div></div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="card">
+      <div class="chart-controls" style="margin-bottom:16px">
+        <div style="font-size:0.85rem;color:var(--text2)">Taille (cm) en fonction de l'âge</div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="growthChart"></canvas>
+      </div>
+    </div>
+
+    <div class="card" id="measuresCard">
+      <h2>📋 Toutes les mesures</h2>
+      <div class="table-scroll"><div id="measuresTable"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Utilisateur -->
+<div class="modal-bg" id="userModal">
+  <div class="modal">
+    <h3 id="userModalTitle">Nouvel utilisateur</h3>
+    <div class="form-row">
+      <label>Prénom *</label>
+      <input id="uFirstName" type="text" placeholder="Prénom">
+    </div>
+    <div class="form-row">
+      <label>Nom</label>
+      <input id="uLastName" type="text" placeholder="Nom">
+    </div>
+    <div class="form-row">
+      <label>Date de naissance *</label>
+      <input id="uBirthdate" type="date">
+    </div>
+    <div class="form-row">
+      <label>Sexe *</label>
+      <select id="uSex">
+        <option value="">-- Choisir --</option>
+        <option value="m">Garçon</option>
+        <option value="f">Fille</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Couleur</label>
+      <input id="uColor" type="color" value="#3d6b4f">
+    </div>
+    <div class="form-row">
+      <label>Taille des points sur le graphique</label>
+      <div style="display:flex;align-items:center;gap:10px">
+        <input id="uPointSize" type="range" min="1" max="8" step="0.5" value="3" style="flex:1;accent-color:var(--accent)">
+        <span id="uPointSizeVal" style="font-size:0.85rem;font-weight:600;color:var(--accent);min-width:28px;text-align:right">3</span>
+      </div>
+    </div>
+    <div style="background:var(--bg);border-radius:8px;padding:14px;margin-top:4px">
+      <div style="font-size:0.8rem;font-weight:600;color:var(--text2);margin-bottom:8px">TAILLE DES PARENTS (pour projection)</div>
+      <div class="form-row">
+        <label>Taille père (cm)</label>
+        <input id="uFatherHeight" type="number" placeholder="ex: 178" min="140" max="220">
+      </div>
+      <div class="form-row">
+        <label>Taille mère (cm)</label>
+        <input id="uMotherHeight" type="number" placeholder="ex: 165" min="130" max="210">
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('userModal')">Annuler</button>
+      <button class="btn primary" onclick="saveUser()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Mesure -->
+<div class="modal-bg" id="measureModal">
+  <div class="modal">
+    <h3 id="measureModalTitle">Nouvelle mesure</h3>
+    <div id="mSavedMsg" style="display:none;background:#eef5f1;border:1px solid var(--accent);border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:0.85rem;color:var(--accent)">✅ Mesure enregistrée !</div>
+    <div class="form-row">
+      <label>Utilisateur *</label>
+      <select id="mUser"></select>
+    </div>
+    <div class="form-row">
+      <label>Date *</label>
+      <div style="display:grid;grid-template-columns:2fr 2fr 3fr;gap:6px">
+        <input id="mDay" type="number" min="1" max="31" placeholder="Jour" style="text-align:center">
+        <input id="mMonth" type="number" min="1" max="12" placeholder="Mois" style="text-align:center">
+        <input id="mYear" type="number" min="1900" max="2100" placeholder="Année" style="text-align:center">
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Taille (cm) *</label>
+      <input id="mHeight" type="number" step="0.1" placeholder="ex: 112.5" min="40" max="220">
+    </div>
+    <div class="form-row">
+      <label>Note (optionnel)</label>
+      <input id="mNote" type="text" placeholder="ex: visite pédiatrique">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('measureModal')">Fermer</button>
+      <button class="btn primary" id="saveMeasureBtn" onclick="saveMeasure()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== DATA =====
+let state = {
+  users: [],
+  measures: [],
+  showRefM: false,
+  showRefF: false,
+  editUserId: null,
+  editMeasureId: null
+};
+
+function loadState() {
+  try {
+    const s = localStorage.getItem('croissance_v2');
+    if (s) state = { ...state, ...JSON.parse(s) };
+  } catch(e) {}
+}
+function saveState() {
+  localStorage.setItem('croissance_v2', JSON.stringify(state));
+}
+
+// ===== FRENCH REFERENCE CURVES (CIE-INSERM / Sempé) =====
+// Percentiles for height (cm) at each age (years): 3, 10, 25, 50, 75, 90, 97
+// Source: French health booklet reference data
+
+const REF_BOYS = {
+  ages: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18],
+  p3:  [71.5,81.5,88.5,94.5,100,105,109.5,113.5,118,122.5,127,131,136,141.5,152,158,162,163.5],
+  p10: [73.5,84,91.5,97.5,103,108.5,113,117.5,122,127,131.5,136,141,148,158,163,166.5,168],
+  p25: [76,87,94.5,100.5,106.5,112,116.5,121.5,126,131,136,141,146.5,154,163,167.5,170.5,171.5],
+  p50: [78.5,90,97.5,104,110,115.5,120.5,125.5,130,135.5,141,146,152,160,167.5,171.5,174,174.5],
+  p75: [81,93,101,107.5,113.5,119,124.5,129.5,134.5,140,145.5,151,157,165,171.5,175,177,177.5],
+  p90: [83.5,96,104,111,117,122.5,128,133.5,138.5,144,150,156,162.5,169.5,175.5,178.5,180,180.5],
+  p97: [86,99,107,114,120.5,126,131.5,137,142.5,148.5,154.5,161,167.5,173.5,179,181.5,183,183.5]
+};
+
+const REF_GIRLS = {
+  ages: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18],
+  p3:  [70,80,87,93,98.5,103.5,108,112.5,117,121.5,127,132.5,137.5,141,143.5,145,146,146.5],
+  p10: [72,82.5,90,96,101.5,107,111.5,116.5,121,126,131.5,137.5,142.5,146,148,149.5,150,150.5],
+  p25: [74.5,85.5,93,99,105,110.5,115.5,120.5,125.5,131,136.5,142,147,150.5,152.5,153.5,154,154],
+  p50: [77,88.5,96,102.5,108.5,114,119,124.5,130,135.5,141.5,147,152,155.5,157,158,158.5,158.5],
+  p75: [79.5,91.5,99,105.5,112,117.5,122.5,128.5,134.5,140,146,151.5,156,159,160.5,161.5,162,162],
+  p90: [82,94.5,102,109,115.5,121,126,132,138,143.5,149.5,155.5,160,163,164.5,165.5,166,166],
+  p97: [84.5,97,105,112.5,119,124.5,130,136,142,148,153.5,159.5,164,167,168,169,169.5,169.5]
+};
+
+// ===== CHART =====
+let chart = null;
+
+function getRefDatasets(ref, color) {
+  const keys = ['p3','p10','p25','p50','p75','p90','p97'];
+  const centileLabels = ['3','10','25','50','75','90','97'];
+  const opacities = [0.25, 0.35, 0.45, 0.7, 0.45, 0.35, 0.25];
+  const dashes = [[6,4],[4,3],[2,2],[],[2,2],[4,3],[6,4]];
+  return keys.map((k, i) => ({
+    label: `(réf) ${centileLabels[i]}e`,
+    data: ref.ages.map((a,j) => ({ x: a, y: ref[k][j] })),
+    borderColor: color.replace(')', `,${opacities[i]})`).replace('rgb','rgba'),
+    borderWidth: k === 'p50' ? 2 : 1,
+    borderDash: dashes[i],
+    pointRadius: 0,
+    fill: false,
+    tension: 0.4,
+    yAxisID: 'y'
+  }));
+}
+
+// Plugin to draw centile labels on right edge of reference curves
+const centileLabelPlugin = {
+  id: 'centileLabels',
+  afterDraw(chart) {
+    const ctx = chart.ctx;
+    const xScale = chart.scales.x;
+    const yScale = chart.scales.y;
+    const rightX = xScale.getPixelForValue(18);
+
+    chart.data.datasets.forEach(ds => {
+      if (!ds.label || !ds.label.startsWith('(réf)')) return;
+      const lastPoint = ds.data[ds.data.length - 1];
+      if (!lastPoint) return;
+      const y = yScale.getPixelForValue(lastPoint.y);
+      ctx.save();
+      ctx.font = '9px DM Sans, sans-serif';
+      ctx.fillStyle = ds.borderColor;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const centile = ds.label.replace('(réf) ', '');
+      ctx.fillText(centile, rightX + 4, y);
+      ctx.restore();
+    });
+  }
+};
+
+// Custom legend: bottom-right inside chart area, line + name, no projections/ref
+const customLegendPlugin = {
+  id: 'customLegend',
+  afterDraw(chart) {
+    const ctx = chart.ctx;
+    const { right, bottom } = chart.chartArea;
+
+    // Collect user datasets only (not ref, not projection, not _)
+    const items = chart.data.datasets.filter(ds =>
+      ds.label &&
+      !ds.label.startsWith('(réf)') &&
+      !ds.label.startsWith('_') &&
+      !ds.label.startsWith('Projection')
+    );
+    if (items.length === 0) return;
+
+    const lineW = 22;
+    const pad = 10;
+    const rowH = 20;
+    const fontSize = 11;
+    const fontFace = `${fontSize}px DM Sans, sans-serif`;
+
+    ctx.save();
+    ctx.font = fontFace;
+
+    // Measure max label width
+    const maxTextW = Math.max(...items.map(ds => ctx.measureText(ds.label).width));
+    const boxW = pad + lineW + 6 + maxTextW + pad;
+    const boxH = pad + items.length * rowH + pad - 4;
+
+    const bx = right - boxW - 8;
+    const by = bottom - boxH - 8;
+
+    // Background
+    ctx.fillStyle = 'rgba(255,253,247,0.88)';
+    ctx.strokeStyle = '#d8cdb8';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, boxW, boxH, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    // Draw each item
+    items.forEach((ds, i) => {
+      const y = by + pad + i * rowH + rowH / 2 - 2;
+      const lx = bx + pad;
+
+      // Line segment
+      ctx.strokeStyle = ds.borderColor;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(lx, y);
+      ctx.lineTo(lx + lineW, y);
+      ctx.stroke();
+
+      // Label
+      ctx.fillStyle = '#2a1f0e';
+      ctx.font = fontFace;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.fillText(ds.label, lx + lineW + 6, y);
+    });
+
+    ctx.restore();
+  }
+};
+
+function initChart() {
+  const ctx = document.getElementById('growthChart').getContext('2d');
+  chart = new Chart(ctx, {
+    type: 'line',
+    plugins: [centileLabelPlugin, customLegendPlugin],
+    data: { datasets: [] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'nearest', axis: 'x', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          filter: (item) => !item.dataset.label.includes('(réf)') && !item.dataset.label.startsWith('_'),
+          itemSort: (a, b) => b.parsed.y - a.parsed.y,
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y} cm`
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: 1,
+          max: 19,
+          title: { display: true, text: 'Âge (ans)', font: { family: 'DM Sans', size: 11 } },
+          ticks: { font: { family: 'DM Sans', size: 10 }, stepSize: 1 },
+          grid: { color: '#e8e0d0' }
+        },
+        y: {
+          min: 65,
+          max: 200,
+          position: 'left',
+          title: { display: true, text: 'Taille (cm)', font: { family: 'DM Sans', size: 11 } },
+          ticks: { font: { family: 'DM Sans', size: 10 }, stepSize: 10 },
+          grid: { color: '#e8e0d0' }
+        },
+        y2: {
+          min: 65,
+          max: 200,
+          position: 'right',
+          title: { display: false },
+          ticks: { font: { family: 'DM Sans', size: 10 }, stepSize: 10 },
+          grid: { drawOnChartArea: false }
+        }
+      }
+    }
+  });
+  updateChart();
+}
+
+function getAgeAtDate(birthdate, date) {
+  const b = new Date(birthdate);
+  const d = new Date(date);
+  return (d - b) / (1000 * 60 * 60 * 24 * 365.25);
+}
+
+function computeProjection(user) {
+  const userMeasures = state.measures
+    .filter(m => m.userId === user.id && m.height)
+    .sort((a,b) => new Date(a.date) - new Date(b.date));
+
+  if (userMeasures.length === 0) return null;
+
+  const ageNow = getAgeAtDate(user.birthdate, new Date().toISOString().split('T')[0]);
+  if (ageNow >= 18) return null;
+
+  const detail = {};
+
+  // Mid-parental height method
+  let mphProjection = null;
+  if (user.fatherHeight && user.motherHeight) {
+    const fH = parseFloat(user.fatherHeight);
+    const mH = parseFloat(user.motherHeight);
+    const correction = user.sex === 'm' ? +13 : -13;
+    mphProjection = (fH + mH + correction) / 2;
+    detail.mph = {
+      fH, mH, correction,
+      result: Math.round(mphProjection * 10) / 10
+    };
+  }
+
+  // Trend-based projection
+  let trendProjection = null;
+  if (userMeasures.length >= 2) {
+    const last = userMeasures[userMeasures.length - 1];
+    const prev = userMeasures[userMeasures.length - 2];
+    const lastAge = getAgeAtDate(user.birthdate, last.date);
+    const prevAge = getAgeAtDate(user.birthdate, prev.date);
+    const ref = user.sex === 'm' ? REF_BOYS : REF_GIRLS;
+    const p50at18 = ref.p50[ref.p50.length - 1];
+    const p50now = interpolateRef(ref.p50, ref.ages, lastAge);
+    const refRemaining = p50at18 - p50now;
+    const ratio = last.height / p50now;
+    trendProjection = last.height + refRemaining * ratio;
+    detail.trend = {
+      lastHeight: last.height,
+      lastAge: Math.round(lastAge * 100) / 100,
+      prevHeight: prev.height,
+      prevAge: Math.round(prevAge * 100) / 100,
+      p50now: Math.round(p50now * 10) / 10,
+      p50at18,
+      refRemaining: Math.round(refRemaining * 10) / 10,
+      ratio: Math.round(ratio * 1000) / 1000,
+      result: Math.round(trendProjection * 10) / 10
+    };
+  }
+
+  // Combine
+  let finalProjection = null;
+  if (mphProjection !== null && trendProjection !== null) {
+    finalProjection = (mphProjection * 0.5 + trendProjection * 0.5);
+    detail.combined = true;
+  } else {
+    finalProjection = mphProjection ?? trendProjection;
+    detail.combined = false;
+  }
+
+  if (!finalProjection) return null;
+  detail.final = Math.round(finalProjection * 10) / 10;
+  return detail;
+}
+
+function interpolateRef(values, ages, age) {
+  if (age <= ages[0]) return values[0];
+  if (age >= ages[ages.length-1]) return values[values.length-1];
+  for (let i = 0; i < ages.length - 1; i++) {
+    if (age >= ages[i] && age <= ages[i+1]) {
+      const t = (age - ages[i]) / (ages[i+1] - ages[i]);
+      return values[i] + t * (values[i+1] - values[i]);
+    }
+  }
+  return values[values.length-1];
+}
+
+function updateChart() {
+  if (!chart) return;
+  const datasets = [];
+
+  // Reference curves
+  if (state.showRefM) {
+    datasets.push(...getRefDatasets(REF_BOYS, 'rgb(36, 113, 163)'));
+  }
+  if (state.showRefF) {
+    datasets.push(...getRefDatasets(REF_GIRLS, 'rgb(194, 24, 91)'));
+  }
+
+  // User datasets
+  state.users.forEach(user => {
+    const measures = state.measures
+      .filter(m => m.userId === user.id && m.height)
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
+
+    const data = measures.map(m => ({
+      x: Math.round(getAgeAtDate(user.birthdate, m.date) * 100) / 100,
+      y: m.height
+    }));
+
+    if (data.length > 0) {
+      const ps = user.pointSize ?? 3;
+      datasets.push({
+        label: (user.firstName + (user.lastName ? ' ' + user.lastName : '')).trim(),
+        data,
+        borderColor: user.color,
+        backgroundColor: user.color,
+        borderWidth: 1.5,
+        pointRadius: ps,
+        pointHoverRadius: ps + 2,
+        fill: false,
+        tension: 0.3
+      });
+
+      // Projection point at 18 only (single circle)
+      const proj = computeProjection(user);
+      if (proj !== null) {
+        datasets.push({
+          label: `Projection ${user.firstName}`,
+          data: [{ x: 18, y: proj.final }],
+          borderColor: user.color,
+          backgroundColor: user.color + '55',
+          borderWidth: 2.5,
+          pointRadius: 5,
+          pointStyle: 'circle',
+          pointHoverRadius: 7,
+          fill: false,
+          showLine: false
+        });
+      }
+    }
+  });
+
+  chart.data.datasets = datasets;
+  chart.update();
+}
+
+// ===== UI RENDERING =====
+function renderUsers() {
+  const list = document.getElementById('userList');
+  if (state.users.length === 0) {
+    list.innerHTML = '<div class="empty-state" style="padding:16px;font-size:0.85rem">Aucun utilisateur</div>';
+    return;
+  }
+  list.innerHTML = state.users.map(u => {
+    const measures = state.measures.filter(m => m.userId === u.id);
+    const age = getAgeAtDate(u.birthdate, new Date().toISOString().split('T')[0]);
+    return `
+    <div class="user-item" onclick="selectUser('${u.id}')">
+      <div class="user-dot" style="background:${u.color}"></div>
+      <div style="flex:1">
+        <div class="user-name">${u.firstName}${u.lastName ? ' ' + u.lastName : ''}</div>
+        <div class="user-sub">${u.sex === 'm' ? '♂' : '♀'} · ${Math.floor(age)} ans · ${measures.length} mesure(s)</div>
+      </div>
+      <div class="user-actions">
+        <button class="btn small" onclick="event.stopPropagation();editUser('${u.id}')">✏️</button>
+        <button class="btn small danger" onclick="event.stopPropagation();deleteUser('${u.id}')">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function selectUser(id) {
+  renderStats(id);
+}
+
+function renderStats(userId) {
+  const user = state.users.find(u => u.id === userId);
+  if (!user) return;
+  const measures = state.measures.filter(m => m.userId === userId).sort((a,b) => new Date(a.date) - new Date(b.date));
+  const age = getAgeAtDate(user.birthdate, new Date().toISOString().split('T')[0]);
+  const proj = computeProjection(user);
+  const lastMeasure = measures[measures.length - 1];
+
+  let html = `<div style="font-weight:600;margin-bottom:10px;color:var(--text)">${user.firstName}${user.lastName ? ' '+user.lastName : ''}</div>`;
+  html += `<div class="stat-grid">`;
+  html += `<div class="stat-box"><div class="stat-val">${Math.floor(age)}</div><div class="stat-label">ans</div></div>`;
+  if (lastMeasure) {
+    html += `<div class="stat-box"><div class="stat-val">${lastMeasure.height}</div><div class="stat-label">cm (dernière)</div></div>`;
+  }
+  html += `<div class="stat-box"><div class="stat-val">${measures.length}</div><div class="stat-label">mesures</div></div>`;
+  if (proj) {
+    html += `<div class="stat-box" style="border-color:var(--accent)"><div class="stat-val" style="color:var(--accent)">${proj.final}</div><div class="stat-label">cm projeté</div></div>`;
+  }
+  html += `</div>`;
+
+  if (proj) {
+    const r = n => Math.round(n * 10) / 10;
+    let calcHtml = `<div style="margin-top:12px;font-size:0.8rem;color:var(--text2)">`;
+    calcHtml += `<div style="font-weight:600;color:var(--text);margin-bottom:8px;font-size:0.82rem">📐 Détail du calcul de projection</div>`;
+
+    if (proj.mph) {
+      const m = proj.mph;
+      const sign = m.correction > 0 ? '+13' : '−13';
+      calcHtml += `
+        <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid #8b4513">
+          <div style="font-weight:600;color:#8b4513;margin-bottom:6px">① Méthode parentale (Tanner)</div>
+          <div style="line-height:1.9">
+            Taille père : <b>${m.fH} cm</b><br>
+            Taille mère : <b>${m.mH} cm</b><br>
+            Correction ${user.sex === 'm' ? 'garçon' : 'fille'} : <b>${sign} cm</b><br>
+            <span style="border-top:1px solid var(--border);display:block;margin:4px 0;padding-top:4px">
+              (${m.fH} + ${m.mH} ${m.correction > 0 ? '+' : '−'} 13) ÷ 2 = <b>${m.result} cm</b>
+            </span>
+          </div>
+        </div>`;
+    }
+
+    if (proj.trend) {
+      const t = proj.trend;
+      calcHtml += `
+        <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid #2471a3">
+          <div style="font-weight:600;color:#2471a3;margin-bottom:6px">② Tendance de croissance (courbe P50)</div>
+          <div style="line-height:1.9">
+            Dernière mesure : <b>${t.lastHeight} cm</b> à <b>${t.lastAge} ans</b><br>
+            P50 de référence à cet âge : <b>${t.p50now} cm</b><br>
+            P50 de référence à 18 ans : <b>${t.p50at18} cm</b><br>
+            Croissance restante (réf.) : <b>${t.refRemaining} cm</b><br>
+            Ratio taille / P50 : <b>${t.lastHeight} ÷ ${t.p50now} = ${t.ratio}</b><br>
+            <span style="border-top:1px solid var(--border);display:block;margin:4px 0;padding-top:4px">
+              ${t.lastHeight} + ${t.refRemaining} × ${t.ratio} = <b>${t.result} cm</b>
+            </span>
+          </div>
+        </div>`;
+    }
+
+    if (proj.combined) {
+      calcHtml += `
+        <div style="background:var(--bg);border-radius:8px;padding:10px 12px;border-left:3px solid var(--accent)">
+          <div style="font-weight:600;color:var(--accent);margin-bottom:6px">③ Combinaison (moyenne 50/50)</div>
+          <div style="line-height:1.9">
+            Méthode parentale : <b>${proj.mph.result} cm</b><br>
+            Tendance de croissance : <b>${proj.trend.result} cm</b><br>
+            <span style="border-top:1px solid var(--border);display:block;margin:4px 0;padding-top:4px">
+              (${proj.mph.result} + ${proj.trend.result}) ÷ 2 = <b>${proj.final} cm</b>
+            </span>
+          </div>
+        </div>`;
+    }
+
+    calcHtml += `</div>`;
+    html += calcHtml;
+  }
+
+  document.getElementById('statsContent').innerHTML = html;
+}
+
+function renderMeasuresTable() {
+  const el = document.getElementById('measuresTable');
+  if (state.measures.length === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="icon">📏</div><div>Aucune mesure enregistrée</div></div>';
+    return;
+  }
+  const sorted = [...state.measures].sort((a,b) => new Date(b.date) - new Date(a.date));
+  el.innerHTML = `<table class="measures-table">
+    <thead><tr>
+      <th>Utilisateur</th><th>Date</th><th>Âge</th><th>Taille</th><th>Note</th><th></th>
+    </tr></thead>
+    <tbody>
+    ${sorted.map(m => {
+      const user = state.users.find(u => u.id === m.userId);
+      if (!user) return '';
+      const age = getAgeAtDate(user.birthdate, m.date);
+      return `<tr>
+        <td><span style="display:inline-flex;align-items:center;gap:6px">
+          <span style="width:10px;height:10px;border-radius:50%;background:${user.color};display:inline-block"></span>
+          ${user.firstName}
+        </span></td>
+        <td>${new Date(m.date + 'T12:00:00').toLocaleDateString('fr-FR')}</td>
+        <td>${Math.floor(age)} ans ${Math.floor((age % 1) * 12)} mois</td>
+        <td><b>${m.height} cm</b></td>
+        <td style="color:var(--text2);font-size:0.82rem">${m.note || ''}</td>
+        <td style="white-space:nowrap">
+          <button class="btn small" onclick="editMeasure('${m.id}')" style="margin-right:4px">✏️</button>
+          <button class="btn small danger" onclick="deleteMeasure('${m.id}')">🗑</button>
+        </td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+
+// ===== MODALS =====
+// Slider live display
+document.getElementById('uPointSize').addEventListener('input', function() {
+  document.getElementById('uPointSizeVal').textContent = this.value;
+});
+
+function openAddUser() {
+  state.editUserId = null;
+  document.getElementById('userModalTitle').textContent = 'Nouvel utilisateur';
+  document.getElementById('uFirstName').value = '';
+  document.getElementById('uLastName').value = '';
+  document.getElementById('uBirthdate').value = '';
+  document.getElementById('uSex').value = '';
+  document.getElementById('uColor').value = randomColor();
+  document.getElementById('uPointSize').value = 3;
+  document.getElementById('uPointSizeVal').textContent = '3';
+  document.getElementById('uFatherHeight').value = '';
+  document.getElementById('uMotherHeight').value = '';
+  document.getElementById('userModal').classList.add('open');
+}
+
+function editUser(id) {
+  const user = state.users.find(u => u.id === id);
+  if (!user) return;
+  state.editUserId = id;
+  document.getElementById('userModalTitle').textContent = 'Modifier utilisateur';
+  document.getElementById('uFirstName').value = user.firstName || '';
+  document.getElementById('uLastName').value = user.lastName || '';
+  document.getElementById('uBirthdate').value = user.birthdate || '';
+  document.getElementById('uSex').value = user.sex || '';
+  document.getElementById('uColor').value = user.color || '#3d6b4f';
+  const ps = user.pointSize ?? 3;
+  document.getElementById('uPointSize').value = ps;
+  document.getElementById('uPointSizeVal').textContent = ps;
+  document.getElementById('uFatherHeight').value = user.fatherHeight || '';
+  document.getElementById('uMotherHeight').value = user.motherHeight || '';
+  document.getElementById('userModal').classList.add('open');
+}
+
+function saveUser() {
+  const firstName = document.getElementById('uFirstName').value.trim();
+  const lastName = document.getElementById('uLastName').value.trim();
+  const birthdate = document.getElementById('uBirthdate').value;
+  const sex = document.getElementById('uSex').value;
+  const color = document.getElementById('uColor').value;
+  const pointSize = parseFloat(document.getElementById('uPointSize').value) || 3;
+  const fatherHeight = document.getElementById('uFatherHeight').value;
+  const motherHeight = document.getElementById('uMotherHeight').value;
+
+  if (!firstName || !birthdate || !sex) {
+    alert('Prénom, date de naissance et sexe sont requis.');
+    return;
+  }
+
+  if (state.editUserId) {
+    const idx = state.users.findIndex(u => u.id === state.editUserId);
+    if (idx >= 0) {
+      state.users[idx] = { ...state.users[idx], firstName, lastName, birthdate, sex, color, pointSize, fatherHeight, motherHeight };
+    }
+  } else {
+    state.users.push({ id: uid(), firstName, lastName, birthdate, sex, color, pointSize, fatherHeight, motherHeight });
+  }
+
+  saveState();
+  closeModal('userModal');
+  renderUsers();
+  updateChart();
+  populateUserSelect();
+}
+
+function deleteUser(id) {
+  if (!confirm('Supprimer cet utilisateur et toutes ses mesures ?')) return;
+  state.users = state.users.filter(u => u.id !== id);
+  state.measures = state.measures.filter(m => m.userId !== id);
+  saveState();
+  renderUsers();
+  renderMeasuresTable();
+  updateChart();
+  populateUserSelect();
+  document.getElementById('statsContent').innerHTML = '<div class="empty-state" style="padding:16px">Sélectionnez un utilisateur</div>';
+}
+
+function openAddMeasure() {
+  state.editMeasureId = null;
+  populateUserSelect();
+  document.getElementById('measureModalTitle').textContent = 'Nouvelle mesure';
+  document.getElementById('saveMeasureBtn').textContent = 'Enregistrer';
+  const today = new Date();
+  document.getElementById('mDay').value = today.getDate();
+  document.getElementById('mMonth').value = today.getMonth() + 1;
+  document.getElementById('mYear').value = today.getFullYear();
+  document.getElementById('mHeight').value = '';
+  document.getElementById('mNote').value = '';
+  document.getElementById('mSavedMsg').style.display = 'none';
+  document.getElementById('measureModal').classList.add('open');
+  setTimeout(() => document.getElementById('mHeight').focus(), 100);
+}
+
+function editMeasure(id) {
+  const m = state.measures.find(x => x.id === id);
+  if (!m) return;
+  state.editMeasureId = id;
+  populateUserSelect();
+  document.getElementById('measureModalTitle').textContent = 'Modifier la mesure';
+  document.getElementById('saveMeasureBtn').textContent = 'Mettre à jour';
+  document.getElementById('mUser').value = m.userId;
+  // Parse stored YYYY-MM-DD safely
+  const parts = m.date.split('-');
+  document.getElementById('mYear').value = parts[0] || '';
+  document.getElementById('mMonth').value = parseInt(parts[1], 10) || '';
+  document.getElementById('mDay').value = parseInt(parts[2], 10) || '';
+  document.getElementById('mHeight').value = m.height;
+  document.getElementById('mNote').value = m.note || '';
+  document.getElementById('mSavedMsg').style.display = 'none';
+  document.getElementById('measureModal').classList.add('open');
+}
+
+function populateUserSelect() {
+  const sel = document.getElementById('mUser');
+  sel.innerHTML = state.users.map(u => `<option value="${u.id}">${u.firstName}${u.lastName ? ' '+u.lastName : ''}</option>`).join('');
+}
+
+function saveMeasure() {
+  const userId = document.getElementById('mUser').value;
+  const day = parseInt(document.getElementById('mDay').value, 10);
+  const month = parseInt(document.getElementById('mMonth').value, 10);
+  const year = parseInt(document.getElementById('mYear').value, 10);
+  const height = parseFloat(document.getElementById('mHeight').value);
+  const note = document.getElementById('mNote').value.trim();
+
+  // Validate date
+  if (!day || !month || !year || year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    alert('Veuillez saisir une date valide (jour, mois, année).');
+    return;
+  }
+  const dateObj = new Date(year, month - 1, day);
+  if (dateObj.getFullYear() !== year || dateObj.getMonth() !== month - 1 || dateObj.getDate() !== day) {
+    alert('Date invalide (ex: 31 février n\'existe pas).');
+    return;
+  }
+  const date = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+
+  if (!userId || isNaN(height) || height < 40 || height > 220) {
+    alert('Utilisateur et taille (40-220 cm) sont requis.');
+    return;
+  }
+
+  if (state.editMeasureId) {
+    // Edit mode: update existing
+    const idx = state.measures.findIndex(x => x.id === state.editMeasureId);
+    if (idx >= 0) state.measures[idx] = { ...state.measures[idx], userId, date, height, note };
+    state.editMeasureId = null;
+    saveState();
+    renderMeasuresTable();
+    updateChart();
+    const user = state.users.find(u => u.id === userId);
+    if (user) renderStats(userId);
+    closeModal('measureModal');
+  } else {
+    // Add mode: stay open, keep date, clear height
+    state.measures.push({ id: uid(), userId, date, height, note });
+    saveState();
+    renderMeasuresTable();
+    updateChart();
+    const user = state.users.find(u => u.id === userId);
+    if (user) renderStats(userId);
+    // Keep modal open, show confirmation, clear height/note only (keep date)
+    document.getElementById('mHeight').value = '';
+    document.getElementById('mNote').value = '';
+    const msg = document.getElementById('mSavedMsg');
+    msg.style.display = 'block';
+    setTimeout(() => { msg.style.display = 'none'; }, 2500);
+    setTimeout(() => document.getElementById('mHeight').focus(), 50);
+  }
+}
+
+function deleteMeasure(id) {
+  if (!confirm('Supprimer cette mesure ?')) return;
+  state.measures = state.measures.filter(m => m.id !== id);
+  saveState();
+  renderMeasuresTable();
+  updateChart();
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+function toggleRef(sex) {
+  if (sex === 'm') {
+    state.showRefM = !state.showRefM;
+    document.getElementById('toggleM').className = 'toggle' + (state.showRefM ? ' active-m' : '');
+  } else {
+    state.showRefF = !state.showRefF;
+    document.getElementById('toggleF').className = 'toggle' + (state.showRefF ? ' active-f' : '');
+  }
+  saveState();
+  updateChart();
+}
+
+function exportData() {
+  const data = JSON.stringify({ users: state.users, measures: state.measures }, null, 2);
+  const a = document.createElement('a');
+  a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(data);
+  a.download = `croissance_${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+}
+
+function exportChart() {
+  // Build datasets as plain JSON for the exported file
+  const exportDatasets = JSON.stringify(chart.data.datasets);
+  const exportUsers = JSON.stringify(state.users.filter(u =>
+    state.measures.some(m => m.userId === u.id)
+  ).map(u => ({ firstName: u.firstName, lastName: u.lastName, color: u.color })));
+
+  const today = new Date().toLocaleDateString('fr-FR');
+  const filename = `graphique_croissance_${new Date().toISOString().split('T')[0]}.html`;
+
+  const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graphique de Croissance – ${today}</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"><\/script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'DM Sans', sans-serif; background: #f5f0e8; color: #2a1f0e; margin: 0; padding: 24px; }
+  h1 { font-family: 'DM Serif Display', serif; color: #3d6b4f; margin-bottom: 4px; font-size: 1.5rem; }
+  .sub { color: #6b5c42; font-size: 0.85rem; margin-bottom: 20px; }
+  .chart-box { background: #fffdf7; border: 1px solid #d8cdb8; border-radius: 12px; padding: 20px; box-shadow: 0 2px 12px rgba(42,31,14,0.08); }
+  .chart-wrap { position: relative; height: clamp(320px, 55vw, 600px); }
+</style>
+</head>
+<body>
+<h1>📏 Carnet de Croissance</h1>
+<div class="sub">Exporté le ${today}</div>
+<div class="chart-box">
+  <div class="chart-wrap"><canvas id="chart"></canvas></div>
+</div>
+<script>
+const datasets = ${exportDatasets};
+const users = ${exportUsers};
+
+// Custom legend plugin
+const customLegendPlugin = {
+  id: 'customLegend',
+  afterDraw(chart) {
+    const ctx = chart.ctx;
+    const { right, bottom } = chart.chartArea;
+    const items = chart.data.datasets.filter(ds =>
+      ds.label && !ds.label.startsWith('(réf)') && !ds.label.startsWith('_') && !ds.label.startsWith('Projection')
+    );
+    if (!items.length) return;
+    const lineW = 22, pad = 10, rowH = 20, fontSize = 11;
+    ctx.save();
+    ctx.font = fontSize + 'px DM Sans, sans-serif';
+    const maxTW = Math.max(...items.map(ds => ctx.measureText(ds.label).width));
+    const bW = pad + lineW + 6 + maxTW + pad;
+    const bH = pad + items.length * rowH + pad - 4;
+    const bx = right - bW - 8, by = bottom - bH - 8;
+    ctx.fillStyle = 'rgba(255,253,247,0.88)';
+    ctx.strokeStyle = '#d8cdb8'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(bx, by, bW, bH, 6); ctx.fill(); ctx.stroke();
+    items.forEach((ds, i) => {
+      const y = by + pad + i * rowH + rowH / 2 - 2;
+      ctx.strokeStyle = ds.borderColor; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(bx + pad, y); ctx.lineTo(bx + pad + lineW, y); ctx.stroke();
+      ctx.fillStyle = '#2a1f0e'; ctx.font = fontSize + 'px DM Sans, sans-serif';
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.fillText(ds.label, bx + pad + lineW + 6, y);
+    });
+    ctx.restore();
+  }
+};
+
+// Centile labels plugin
+const centileLabelPlugin = {
+  id: 'centileLabels',
+  afterDraw(chart) {
+    const ctx = chart.ctx;
+    const xScale = chart.scales.x, yScale = chart.scales.y;
+    const rightX = xScale.getPixelForValue(18);
+    chart.data.datasets.forEach(ds => {
+      if (!ds.label || !ds.label.startsWith('(réf)')) return;
+      const last = ds.data[ds.data.length - 1];
+      if (!last) return;
+      const y = yScale.getPixelForValue(last.y);
+      ctx.save(); ctx.font = '9px DM Sans, sans-serif';
+      ctx.fillStyle = ds.borderColor; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(ds.label.replace('(réf) ', ''), rightX + 4, y); ctx.restore();
+    });
+  }
+};
+
+new Chart(document.getElementById('chart'), {
+  type: 'line',
+  plugins: [customLegendPlugin, centileLabelPlugin],
+  data: { datasets },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        filter: i => !i.dataset.label.includes('(réf)') && !i.dataset.label.startsWith('_'),
+        itemSort: (a, b) => b.parsed.y - a.parsed.y,
+        callbacks: { label: c => c.dataset.label + ' : ' + c.parsed.y + ' cm' }
+      }
+    },
+    scales: {
+      x: { type: 'linear', min: 1, max: 19, title: { display: true, text: 'Âge (ans)', font: { family: 'DM Sans', size: 11 } }, ticks: { font: { family: 'DM Sans', size: 10 }, stepSize: 1 }, grid: { color: '#e8e0d0' } },
+      y: { min: 65, max: 200, position: 'left', title: { display: true, text: 'Taille (cm)', font: { family: 'DM Sans', size: 11 } }, ticks: { font: { family: 'DM Sans', size: 10 }, stepSize: 10 }, grid: { color: '#e8e0d0' } },
+      y2: { min: 65, max: 200, position: 'right', ticks: { font: { family: 'DM Sans', size: 10 }, stepSize: 10 }, grid: { drawOnChartArea: false } }
+    }
+  }
+});
+<\/script>
+</body>
+</html>`;
+
+  const a = document.createElement('a');
+  a.href = 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+  a.download = filename;
+  a.click();
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const d = JSON.parse(e.target.result);
+      if (d.users && d.measures) {
+        if (confirm(`Importer ${d.users.length} utilisateur(s) et ${d.measures.length} mesure(s) ? Les données actuelles seront fusionnées.`)) {
+          // Merge by id
+          d.users.forEach(u => { if (!state.users.find(x => x.id === u.id)) state.users.push(u); });
+          d.measures.forEach(m => { if (!state.measures.find(x => x.id === m.id)) state.measures.push(m); });
+          saveState();
+          renderUsers();
+          renderMeasuresTable();
+          updateChart();
+          populateUserSelect();
+        }
+      } else alert('Format de fichier invalide.');
+    } catch(e) { alert('Erreur lors de la lecture du fichier.'); }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+// ===== UTILS =====
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function randomColor() {
+  const colors = ['#3d6b4f','#c0392b','#2471a3','#8b4513','#7d3c98','#d4890a','#1a7a5e','#c0392b','#884ea0'];
+  return colors[Math.floor(Math.random() * colors.length)];
+}
+
+// Close modal on bg click
+document.querySelectorAll('.modal-bg').forEach(bg => {
+  bg.addEventListener('click', e => { if (e.target === bg) bg.classList.remove('open'); });
+});
+
+// ===== INIT =====
+loadState();
+renderUsers();
+initChart();
+renderMeasuresTable();
+populateUserSelect();
+
+// Restore toggle state
+if (state.showRefM) document.getElementById('toggleM').className = 'toggle active-m';
+if (state.showRefF) document.getElementById('toggleF').className = 'toggle active-f';
+</script>
+</body>
+</html>
