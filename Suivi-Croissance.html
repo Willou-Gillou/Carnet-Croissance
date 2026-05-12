@@ -332,11 +332,7 @@
     <div class="card" style="padding:16px">
       <h2>☁️ Sync GitHub Gist</h2>
       <div id="gistStatus" style="font-size:0.8rem;margin-bottom:10px;color:var(--text2)">Non configuré</div>
-      <button class="btn primary" style="width:100%;margin-bottom:6px" onclick="openGistModal()">⚙️ Configurer</button>
-      <div style="display:flex;gap:6px">
-        <button class="btn" style="flex:1;font-size:0.78rem" onclick="gistSave()">⬆ Sauvegarder</button>
-        <button class="btn" style="flex:1;font-size:0.78rem" onclick="gistRestore()">⬇ Restaurer</button>
-      </div>
+      <button class="btn primary" style="width:100%" onclick="openGistModal()">⚙️ Configurer</button>
       <div id="gistLastSync" style="font-size:0.75rem;color:var(--text2);margin-top:8px;text-align:center"></div>
     </div>
   </div>
@@ -458,13 +454,6 @@
     <div class="form-row">
       <label>Gist ID (laisser vide pour en créer un nouveau)</label>
       <input id="gistId" type="text" placeholder="ex: a1b2c3d4e5f6...">
-    </div>
-    <div class="form-row">
-      <label>Sauvegarde automatique</label>
-      <select id="gistAutoSave">
-        <option value="off">Désactivée</option>
-        <option value="on">À chaque modification</option>
-      </select>
     </div>
     <div id="gistModalError" style="display:none;background:#fdecea;border:1px solid #f5c6cb;border-radius:8px;padding:8px 12px;font-size:0.82rem;color:#c0392b;margin-top:8px"></div>
     <div class="modal-actions">
@@ -1358,7 +1347,6 @@ function openGistModal() {
   const cfg = gistGetConfig();
   document.getElementById('gistPat').value = cfg?.pat || '';
   document.getElementById('gistId').value = cfg?.gistId || '';
-  document.getElementById('gistAutoSave').value = cfg?.autoSave || 'off';
   document.getElementById('gistModalError').style.display = 'none';
   document.getElementById('gistModal').classList.add('open');
 }
@@ -1366,19 +1354,18 @@ function openGistModal() {
 function gistSaveConfig() {
   const pat = document.getElementById('gistPat').value.trim();
   const gistId = document.getElementById('gistId').value.trim();
-  const autoSave = document.getElementById('gistAutoSave').value;
-  if (!pat) {
-    showGistError('Le PAT est requis.');
-    return;
-  }
-  gistSetConfig({ pat, gistId, autoSave });
+  if (!pat) { showGistError('Le PAT est requis.'); return; }
+  gistSetConfig({ pat, gistId });
   closeModal('gistModal');
   updateGistStatus();
+  // On first config, check remote immediately
+  gistCheckOnStartup();
 }
 
 function gistClearConfig() {
   if (!confirm('Effacer la configuration Gist ? Les données locales restent intactes.')) return;
   localStorage.removeItem('gist_config');
+  localStorage.removeItem('gist_last_sync');
   closeModal('gistModal');
   updateGistStatus();
 }
@@ -1394,105 +1381,152 @@ function updateGistStatus() {
   const statusEl = document.getElementById('gistStatus');
   const syncEl = document.getElementById('gistLastSync');
   if (!cfg?.pat) {
-    statusEl.textContent = 'Non configuré';
+    statusEl.innerHTML = 'Non configuré';
     statusEl.style.color = 'var(--text2)';
     syncEl.textContent = '';
   } else {
     statusEl.innerHTML = cfg.gistId
-      ? `✅ Connecté · <span style="font-family:monospace;font-size:0.75rem">${cfg.gistId.slice(0,8)}…</span>`
-      : '⚙️ PAT configuré (pas encore de Gist)';
+      ? `✅ Sync active · <span style="font-family:monospace;font-size:0.75rem">${cfg.gistId.slice(0,8)}…</span>`
+      : '⚙️ PAT configuré — en attente de premier push';
     statusEl.style.color = cfg.gistId ? '#2e7d32' : 'var(--text2)';
     const lastSync = localStorage.getItem('gist_last_sync');
     syncEl.textContent = lastSync ? `Dernière sync : ${lastSync}` : '';
   }
 }
 
+// Push local data to Gist silently after every change
 async function gistSave() {
   const cfg = gistGetConfig();
-  if (!cfg?.pat) { alert('Configurez d\'abord votre PAT GitHub.'); openGistModal(); return; }
-  setGistBusy(true);
+  if (!cfg?.pat) return;
   try {
-    const payload = { users: state.users, measures: state.measures };
+    const payload = {
+      _syncedAt: new Date().toISOString(),
+      users: state.users,
+      measures: state.measures
+    };
     const body = {
-      description: 'Carnet de Croissance – sauvegarde automatique',
+      description: 'Carnet de Croissance – sync automatique',
       public: false,
       files: { [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) } }
     };
-    let url, method;
-    if (cfg.gistId) {
-      url = `https://api.github.com/gists/${cfg.gistId}`;
-      method = 'PATCH';
-    } else {
-      url = 'https://api.github.com/gists';
-      method = 'POST';
-    }
+    const url = cfg.gistId ? `https://api.github.com/gists/${cfg.gistId}` : 'https://api.github.com/gists';
+    const method = cfg.gistId ? 'PATCH' : 'POST';
     const resp = await fetch(url, {
       method,
       headers: { 'Authorization': `Bearer ${cfg.pat}`, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json' },
       body: JSON.stringify(body)
     });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.message || `HTTP ${resp.status}`);
-    }
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.message || `HTTP ${resp.status}`); }
     const data = await resp.json();
-    cfg.gistId = data.id;
-    gistSetConfig(cfg);
+    if (!cfg.gistId) { cfg.gistId = data.id; gistSetConfig(cfg); }
     const now = new Date().toLocaleString('fr-FR');
     localStorage.setItem('gist_last_sync', now);
     updateGistStatus();
-    showGistToast('✅ Sauvegarde Gist réussie');
   } catch(e) {
-    showGistToast('❌ Erreur : ' + e.message, true);
+    showGistToast('☁️ Sync Gist échouée : ' + e.message, true);
   }
-  setGistBusy(false);
 }
 
-async function gistRestore() {
+// On startup: fetch Gist, compare timestamps, prompt if remote is newer
+async function gistCheckOnStartup() {
   const cfg = gistGetConfig();
-  if (!cfg?.pat) { alert('Configurez d\'abord votre PAT GitHub.'); openGistModal(); return; }
-  if (!cfg.gistId) { alert('Aucun Gist ID configuré. Faites d\'abord une sauvegarde.'); return; }
-  if (!confirm('Restaurer les données depuis GitHub Gist ? Les données locales actuelles seront remplacées.')) return;
-  setGistBusy(true);
+  if (!cfg?.pat || !cfg?.gistId) {
+    // No Gist yet — push local data to create it
+    if (cfg?.pat && (state.users.length > 0 || state.measures.length > 0)) {
+      await gistSave();
+    }
+    return;
+  }
   try {
     const resp = await fetch(`https://api.github.com/gists/${cfg.gistId}`, {
       headers: { 'Authorization': `Bearer ${cfg.pat}`, 'Accept': 'application/vnd.github+json' }
     });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.message || `HTTP ${resp.status}`);
-    }
+    if (!resp.ok) return;
     const data = await resp.json();
     const file = data.files?.[GIST_FILENAME];
-    if (!file) throw new Error(`Fichier "${GIST_FILENAME}" introuvable dans le Gist.`);
-    // Fetch raw content if truncated
+    if (!file) { await gistSave(); return; } // Gist exists but no file yet
     let content = file.content;
-    if (file.truncated) {
-      const raw = await fetch(file.raw_url);
-      content = await raw.text();
+    if (file.truncated) { const raw = await fetch(file.raw_url); content = await raw.text(); }
+    const remote = JSON.parse(content);
+    if (!remote.users || !remote.measures) return;
+
+    const remoteSyncedAt = remote._syncedAt ? new Date(remote._syncedAt) : null;
+    const localSyncedAt = localStorage.getItem('gist_last_sync')
+      ? new Date(localStorage.getItem('gist_last_sync_iso')) : null;
+
+    const remoteIsNewer = remoteSyncedAt && (!localSyncedAt || remoteSyncedAt > localSyncedAt);
+
+    if (remoteIsNewer) {
+      // Show update popup
+      showGistUpdatePrompt(remote, remoteSyncedAt);
+    } else {
+      // Local is up to date, push any local changes silently
+      await gistSave();
     }
-    const parsed = JSON.parse(content);
-    if (!parsed.users || !parsed.measures) throw new Error('Format de données invalide.');
-    state.users = parsed.users;
-    state.measures = parsed.measures;
-    saveStateWithAutoSync();
-    renderUsers();
-    renderMeasuresTable();
-    updateChart();
-    populateUserSelect();
-    const now = new Date().toLocaleString('fr-FR');
-    localStorage.setItem('gist_last_sync', now);
-    updateGistStatus();
-    showGistToast('✅ Restauration réussie depuis Gist');
   } catch(e) {
-    showGistToast('❌ Erreur : ' + e.message, true);
+    // Silently ignore network errors on startup
   }
-  setGistBusy(false);
+}
+
+let _pendingRemote = null;
+
+function showGistUpdatePrompt(remote, remoteSyncedAt) {
+  _pendingRemote = remote;
+  const dateStr = remoteSyncedAt.toLocaleString('fr-FR');
+  const localUsers = state.users.length;
+  const localMeasures = state.measures.length;
+  const remoteUsers = remote.users.length;
+  const remoteMeasures = remote.measures.length;
+
+  let prompt = document.getElementById('gistUpdatePrompt');
+  if (!prompt) {
+    prompt = document.createElement('div');
+    prompt.id = 'gistUpdatePrompt';
+    prompt.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center';
+    document.body.appendChild(prompt);
+  }
+  prompt.innerHTML = `
+    <div style="background:#fffdf7;border-radius:12px;padding:28px;width:400px;max-width:95vw;box-shadow:0 8px 40px rgba(0,0,0,0.25)">
+      <div style="font-family:'DM Serif Display',serif;font-size:1.2rem;color:#3d6b4f;margin-bottom:12px">☁️ Mise à jour disponible</div>
+      <p style="font-size:0.85rem;color:#6b5c42;line-height:1.7;margin-bottom:16px">
+        Une version plus récente de vos données est disponible sur GitHub Gist.<br>
+        <b>Gist :</b> ${remoteUsers} utilisateur(s), ${remoteMeasures} mesure(s) — <i>${dateStr}</i><br>
+        <b>Local :</b> ${localUsers} utilisateur(s), ${localMeasures} mesure(s)
+      </p>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn" onclick="gistKeepLocal()">Garder local</button>
+        <button class="btn primary" onclick="gistApplyRemote()">Mettre à jour</button>
+      </div>
+    </div>`;
+  prompt.style.display = 'flex';
+}
+
+function gistKeepLocal() {
+  document.getElementById('gistUpdatePrompt').style.display = 'none';
+  _pendingRemote = null;
+  gistSave();
+}
+
+async function gistApplyRemote() {
+  const remote = _pendingRemote;
+  _pendingRemote = null;
+  if (!remote) return;
+  document.getElementById('gistUpdatePrompt').style.display = 'none';
+  state.users = remote.users;
+  state.measures = remote.measures;
+  localStorage.setItem('croissance_v2', JSON.stringify({ ...state }));
+  if (remote._syncedAt) localStorage.setItem('gist_last_sync_iso', remote._syncedAt);
+  localStorage.setItem('gist_last_sync', new Date(remote._syncedAt || Date.now()).toLocaleString('fr-FR'));
+  renderUsers();
+  renderMeasuresTable();
+  updateChart();
+  populateUserSelect();
+  updateGistStatus();
+  showGistToast('✅ Données mises à jour depuis Gist');
 }
 
 function setGistBusy(busy) {
-  const btns = document.querySelectorAll('#statsCard ~ div .btn');
-  btns.forEach(b => b.disabled = busy);
+  // kept for compatibility
 }
 
 let gistToastTimer = null;
@@ -1512,12 +1546,15 @@ function showGistToast(msg, isError = false) {
   gistToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
 }
 
-// Auto-save hook — called after every saveState()
+// Auto-save: push to Gist after every local save
 const _origSaveState = saveState;
 function saveStateWithAutoSync() {
   _origSaveState();
   const cfg = gistGetConfig();
-  if (cfg?.autoSave === 'on' && cfg?.pat) {
+  if (cfg?.pat) {
+    // Store ISO timestamp of this local save
+    const iso = new Date().toISOString();
+    localStorage.setItem('gist_last_sync_iso', iso);
     gistSave();
   }
 }
@@ -1541,6 +1578,56 @@ initChart();
 renderMeasuresTable();
 populateUserSelect();
 updateGistStatus();
+gistCheckOnStartup();
+
+// Poll every 15s when tab is visible
+let gistPollInterval = null;
+
+function gistStartPolling() {
+  if (gistPollInterval) return;
+  gistPollInterval = setInterval(async () => {
+    const cfg = gistGetConfig();
+    if (!cfg?.pat || !cfg?.gistId) return;
+    try {
+      const resp = await fetch(`https://api.github.com/gists/${cfg.gistId}`, {
+        headers: { 'Authorization': `Bearer ${cfg.pat}`, 'Accept': 'application/vnd.github+json' }
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      const file = data.files?.[GIST_FILENAME];
+      if (!file) return;
+      let content = file.content;
+      if (file.truncated) { const raw = await fetch(file.raw_url); content = await raw.text(); }
+      const remote = JSON.parse(content);
+      if (!remote.users || !remote.measures || !remote._syncedAt) return;
+      const remoteSyncedAt = new Date(remote._syncedAt);
+      const localIso = localStorage.getItem('gist_last_sync_iso');
+      const localSyncedAt = localIso ? new Date(localIso) : null;
+      if (!localSyncedAt || remoteSyncedAt > localSyncedAt) {
+        // Only show prompt if not already visible
+        const existing = document.getElementById('gistUpdatePrompt');
+        if (!existing || existing.style.display === 'none') {
+          showGistUpdatePrompt(remote, remoteSyncedAt);
+        }
+      }
+    } catch(e) { /* silently ignore */ }
+  }, 15000);
+}
+
+function gistStopPolling() {
+  if (gistPollInterval) { clearInterval(gistPollInterval); gistPollInterval = null; }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    gistStartPolling();
+  } else {
+    gistStopPolling();
+  }
+});
+
+// Start polling immediately if tab is visible
+if (document.visibilityState === 'visible') gistStartPolling();
 
 // Restore toggle state
 if (state.showRefM) document.getElementById('toggleM').className = 'toggle active-m';
