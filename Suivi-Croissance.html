@@ -293,7 +293,7 @@
 <body>
 
 <header>
-  <h1>📏 Carnet de Croissance <span style="font-family:'DM Sans',sans-serif;font-size:0.75rem;font-weight:400;color:var(--text2);vertical-align:middle;margin-left:4px">v1.0.0</span></h1>
+  <h1>📏 Carnet de Croissance <span style="font-family:'DM Sans',sans-serif;font-size:0.75rem;font-weight:400;color:var(--text2);vertical-align:middle;margin-left:4px">v1.0.1</span></h1>
   <div class="btn-group">
     <button class="btn" onclick="openAddMeasure()">➕ Mesure</button>
     <button class="btn" onclick="openAddUser()">👤 Utilisateur</button>
@@ -482,7 +482,40 @@ function loadState() {
   } catch(e) {}
 }
 function saveState() {
+  // Also persist gist config inside main state as backup
+  const cfg = gistGetConfig();
+  if (cfg) state._gistBackup = cfg;
   localStorage.setItem('croissance_v2', JSON.stringify(state));
+}
+
+// ===== GIST CONFIG STORAGE =====
+// Stored in dedicated key 'gist_config', with fallback to state._gistBackup
+const GIST_CONFIG_KEY = 'gist_config';
+
+function gistGetConfig() {
+  try {
+    // Primary: dedicated key
+    const raw = localStorage.getItem(GIST_CONFIG_KEY);
+    if (raw) {
+      const cfg = JSON.parse(raw);
+      if (cfg?.pat) return cfg;
+    }
+    // Fallback: backup inside main state
+    if (state._gistBackup?.pat) {
+      // Restore to dedicated key
+      localStorage.setItem(GIST_CONFIG_KEY, JSON.stringify(state._gistBackup));
+      return state._gistBackup;
+    }
+  } catch(e) {}
+  return null;
+}
+function gistSetConfig(cfg) {
+  try {
+    localStorage.setItem(GIST_CONFIG_KEY, JSON.stringify(cfg));
+    // Also update backup in state immediately
+    state._gistBackup = cfg;
+    localStorage.setItem('croissance_v2', JSON.stringify(state));
+  } catch(e) {}
 }
 
 // ===== FRENCH REFERENCE CURVES (CIE-INSERM / Sempé) =====
@@ -1336,13 +1369,6 @@ function exportImage() {
 // ===== GIST SYNC =====
 const GIST_FILENAME = 'carnet_croissance.json';
 
-function gistGetConfig() {
-  try { return JSON.parse(localStorage.getItem('gist_config') || 'null'); } catch(e) { return null; }
-}
-function gistSetConfig(cfg) {
-  localStorage.setItem('gist_config', JSON.stringify(cfg));
-}
-
 function openGistModal() {
   const cfg = gistGetConfig();
   document.getElementById('gistPat').value = cfg?.pat || '';
@@ -1364,8 +1390,11 @@ function gistSaveConfig() {
 
 function gistClearConfig() {
   if (!confirm('Effacer la configuration Gist ? Les données locales restent intactes.')) return;
-  localStorage.removeItem('gist_config');
+  localStorage.removeItem(GIST_CONFIG_KEY);
   localStorage.removeItem('gist_last_sync');
+  localStorage.removeItem('gist_last_sync_iso');
+  delete state._gistBackup;
+  localStorage.setItem('croissance_v2', JSON.stringify(state));
   closeModal('gistModal');
   updateGistStatus();
 }
@@ -1505,6 +1534,9 @@ async function gistApplyRemote() {
   document.getElementById('gistUpdatePrompt').style.display = 'none';
   state.users = remote.users;
   state.measures = remote.measures;
+  // Preserve gist config backup when writing state
+  const cfg = gistGetConfig();
+  if (cfg) state._gistBackup = cfg;
   localStorage.setItem('croissance_v2', JSON.stringify({ ...state }));
   const syncIso = remote._canonicalIso || remote._syncedAt || new Date().toISOString();
   localStorage.setItem('gist_last_sync_iso', syncIso);
