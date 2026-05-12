@@ -299,6 +299,7 @@
     <button class="btn" onclick="openAddUser()">👤 Utilisateur</button>
     <button class="btn" onclick="exportData()">⬇ Exporter données</button>
     <button class="btn" onclick="exportChart()">🖼 Exporter graphique</button>
+    <button class="btn" onclick="exportImage()">📷 Exporter image</button>
     <label class="btn" style="cursor:pointer">⬆ Importer données<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
   </div>
 </header>
@@ -326,6 +327,17 @@
     <div class="card" style="padding:16px" id="statsCard">
       <h2>📈 Statistiques</h2>
       <div id="statsContent"><div class="empty-state" style="padding:16px"><div>Sélectionnez un utilisateur</div></div></div>
+    </div>
+
+    <div class="card" style="padding:16px">
+      <h2>☁️ Sync GitHub Gist</h2>
+      <div id="gistStatus" style="font-size:0.8rem;margin-bottom:10px;color:var(--text2)">Non configuré</div>
+      <button class="btn primary" style="width:100%;margin-bottom:6px" onclick="openGistModal()">⚙️ Configurer</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn" style="flex:1;font-size:0.78rem" onclick="gistSave()">⬆ Sauvegarder</button>
+        <button class="btn" style="flex:1;font-size:0.78rem" onclick="gistRestore()">⬇ Restaurer</button>
+      </div>
+      <div id="gistLastSync" style="font-size:0.75rem;color:var(--text2);margin-top:8px;text-align:center"></div>
     </div>
   </div>
 
@@ -427,6 +439,38 @@
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('measureModal')">Fermer</button>
       <button class="btn primary" id="saveMeasureBtn" onclick="saveMeasure()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Gist -->
+<div class="modal-bg" id="gistModal">
+  <div class="modal">
+    <h3>☁️ Sync GitHub Gist</h3>
+    <p style="font-size:0.83rem;color:var(--text2);margin-bottom:16px;line-height:1.6">
+      Les données sont sauvegardées dans un Gist GitHub privé. Créez un <b>Personal Access Token</b> (PAT) avec le scope <code style="background:var(--bg);padding:1px 5px;border-radius:4px">gist</code> sur
+      <a href="https://github.com/settings/tokens" target="_blank" style="color:var(--accent)">github.com/settings/tokens</a>.
+    </p>
+    <div class="form-row">
+      <label>Personal Access Token (PAT) *</label>
+      <input id="gistPat" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+    </div>
+    <div class="form-row">
+      <label>Gist ID (laisser vide pour en créer un nouveau)</label>
+      <input id="gistId" type="text" placeholder="ex: a1b2c3d4e5f6...">
+    </div>
+    <div class="form-row">
+      <label>Sauvegarde automatique</label>
+      <select id="gistAutoSave">
+        <option value="off">Désactivée</option>
+        <option value="on">À chaque modification</option>
+      </select>
+    </div>
+    <div id="gistModalError" style="display:none;background:#fdecea;border:1px solid #f5c6cb;border-radius:8px;padding:8px 12px;font-size:0.82rem;color:#c0392b;margin-top:8px"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('gistModal')">Annuler</button>
+      <button class="btn danger" onclick="gistClearConfig()" style="margin-right:auto">Effacer config</button>
+      <button class="btn primary" onclick="gistSaveConfig()">Enregistrer</button>
     </div>
   </div>
 </div>
@@ -994,7 +1038,7 @@ function saveUser() {
     state.users.push({ id: uid(), firstName, lastName, birthdate, sex, color, pointSize, fatherHeight, motherHeight });
   }
 
-  saveState();
+  saveStateWithAutoSync();
   closeModal('userModal');
   renderUsers();
   updateChart();
@@ -1005,7 +1049,7 @@ function deleteUser(id) {
   if (!confirm('Supprimer cet utilisateur et toutes ses mesures ?')) return;
   state.users = state.users.filter(u => u.id !== id);
   state.measures = state.measures.filter(m => m.userId !== id);
-  saveState();
+  saveStateWithAutoSync();
   renderUsers();
   renderMeasuresTable();
   updateChart();
@@ -1083,7 +1127,7 @@ function saveMeasure() {
     const idx = state.measures.findIndex(x => x.id === state.editMeasureId);
     if (idx >= 0) state.measures[idx] = { ...state.measures[idx], userId, date, height, note };
     state.editMeasureId = null;
-    saveState();
+    saveStateWithAutoSync();
     renderMeasuresTable();
     updateChart();
     const user = state.users.find(u => u.id === userId);
@@ -1092,7 +1136,7 @@ function saveMeasure() {
   } else {
     // Add mode: stay open, keep date, clear height
     state.measures.push({ id: uid(), userId, date, height, note });
-    saveState();
+    saveStateWithAutoSync();
     renderMeasuresTable();
     updateChart();
     const user = state.users.find(u => u.id === userId);
@@ -1110,7 +1154,7 @@ function saveMeasure() {
 function deleteMeasure(id) {
   if (!confirm('Supprimer cette mesure ?')) return;
   state.measures = state.measures.filter(m => m.id !== id);
-  saveState();
+  saveStateWithAutoSync();
   renderMeasuresTable();
   updateChart();
 }
@@ -1127,7 +1171,7 @@ function toggleRef(sex) {
     state.showRefF = !state.showRefF;
     document.getElementById('toggleF').className = 'toggle' + (state.showRefF ? ' active-f' : '');
   }
-  saveState();
+  saveStateWithAutoSync();
   updateChart();
 }
 
@@ -1270,7 +1314,7 @@ function importData(event) {
           // Merge by id
           d.users.forEach(u => { if (!state.users.find(x => x.id === u.id)) state.users.push(u); });
           d.measures.forEach(m => { if (!state.measures.find(x => x.id === m.id)) state.measures.push(m); });
-          saveState();
+          saveStateWithAutoSync();
           renderUsers();
           renderMeasuresTable();
           updateChart();
@@ -1281,6 +1325,201 @@ function importData(event) {
   };
   reader.readAsText(file);
   event.target.value = '';
+}
+
+// ===== EXPORT IMAGE =====
+function exportImage() {
+  const canvas = document.getElementById('growthChart');
+  // Draw on white background
+  const offscreen = document.createElement('canvas');
+  offscreen.width = canvas.width;
+  offscreen.height = canvas.height;
+  const ctx = offscreen.getContext('2d');
+  ctx.fillStyle = '#fffdf7';
+  ctx.fillRect(0, 0, offscreen.width, offscreen.height);
+  ctx.drawImage(canvas, 0, 0);
+  const a = document.createElement('a');
+  a.href = offscreen.toDataURL('image/png');
+  a.download = `graphique_croissance_${new Date().toISOString().split('T')[0]}.png`;
+  a.click();
+}
+
+// ===== GIST SYNC =====
+const GIST_FILENAME = 'carnet_croissance.json';
+
+function gistGetConfig() {
+  try { return JSON.parse(localStorage.getItem('gist_config') || 'null'); } catch(e) { return null; }
+}
+function gistSetConfig(cfg) {
+  localStorage.setItem('gist_config', JSON.stringify(cfg));
+}
+
+function openGistModal() {
+  const cfg = gistGetConfig();
+  document.getElementById('gistPat').value = cfg?.pat || '';
+  document.getElementById('gistId').value = cfg?.gistId || '';
+  document.getElementById('gistAutoSave').value = cfg?.autoSave || 'off';
+  document.getElementById('gistModalError').style.display = 'none';
+  document.getElementById('gistModal').classList.add('open');
+}
+
+function gistSaveConfig() {
+  const pat = document.getElementById('gistPat').value.trim();
+  const gistId = document.getElementById('gistId').value.trim();
+  const autoSave = document.getElementById('gistAutoSave').value;
+  if (!pat) {
+    showGistError('Le PAT est requis.');
+    return;
+  }
+  gistSetConfig({ pat, gistId, autoSave });
+  closeModal('gistModal');
+  updateGistStatus();
+}
+
+function gistClearConfig() {
+  if (!confirm('Effacer la configuration Gist ? Les données locales restent intactes.')) return;
+  localStorage.removeItem('gist_config');
+  closeModal('gistModal');
+  updateGistStatus();
+}
+
+function showGistError(msg) {
+  const el = document.getElementById('gistModalError');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function updateGistStatus() {
+  const cfg = gistGetConfig();
+  const statusEl = document.getElementById('gistStatus');
+  const syncEl = document.getElementById('gistLastSync');
+  if (!cfg?.pat) {
+    statusEl.textContent = 'Non configuré';
+    statusEl.style.color = 'var(--text2)';
+    syncEl.textContent = '';
+  } else {
+    statusEl.innerHTML = cfg.gistId
+      ? `✅ Connecté · <span style="font-family:monospace;font-size:0.75rem">${cfg.gistId.slice(0,8)}…</span>`
+      : '⚙️ PAT configuré (pas encore de Gist)';
+    statusEl.style.color = cfg.gistId ? '#2e7d32' : 'var(--text2)';
+    const lastSync = localStorage.getItem('gist_last_sync');
+    syncEl.textContent = lastSync ? `Dernière sync : ${lastSync}` : '';
+  }
+}
+
+async function gistSave() {
+  const cfg = gistGetConfig();
+  if (!cfg?.pat) { alert('Configurez d\'abord votre PAT GitHub.'); openGistModal(); return; }
+  setGistBusy(true);
+  try {
+    const payload = { users: state.users, measures: state.measures };
+    const body = {
+      description: 'Carnet de Croissance – sauvegarde automatique',
+      public: false,
+      files: { [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) } }
+    };
+    let url, method;
+    if (cfg.gistId) {
+      url = `https://api.github.com/gists/${cfg.gistId}`;
+      method = 'PATCH';
+    } else {
+      url = 'https://api.github.com/gists';
+      method = 'POST';
+    }
+    const resp = await fetch(url, {
+      method,
+      headers: { 'Authorization': `Bearer ${cfg.pat}`, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json' },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    cfg.gistId = data.id;
+    gistSetConfig(cfg);
+    const now = new Date().toLocaleString('fr-FR');
+    localStorage.setItem('gist_last_sync', now);
+    updateGistStatus();
+    showGistToast('✅ Sauvegarde Gist réussie');
+  } catch(e) {
+    showGistToast('❌ Erreur : ' + e.message, true);
+  }
+  setGistBusy(false);
+}
+
+async function gistRestore() {
+  const cfg = gistGetConfig();
+  if (!cfg?.pat) { alert('Configurez d\'abord votre PAT GitHub.'); openGistModal(); return; }
+  if (!cfg.gistId) { alert('Aucun Gist ID configuré. Faites d\'abord une sauvegarde.'); return; }
+  if (!confirm('Restaurer les données depuis GitHub Gist ? Les données locales actuelles seront remplacées.')) return;
+  setGistBusy(true);
+  try {
+    const resp = await fetch(`https://api.github.com/gists/${cfg.gistId}`, {
+      headers: { 'Authorization': `Bearer ${cfg.pat}`, 'Accept': 'application/vnd.github+json' }
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    const file = data.files?.[GIST_FILENAME];
+    if (!file) throw new Error(`Fichier "${GIST_FILENAME}" introuvable dans le Gist.`);
+    // Fetch raw content if truncated
+    let content = file.content;
+    if (file.truncated) {
+      const raw = await fetch(file.raw_url);
+      content = await raw.text();
+    }
+    const parsed = JSON.parse(content);
+    if (!parsed.users || !parsed.measures) throw new Error('Format de données invalide.');
+    state.users = parsed.users;
+    state.measures = parsed.measures;
+    saveStateWithAutoSync();
+    renderUsers();
+    renderMeasuresTable();
+    updateChart();
+    populateUserSelect();
+    const now = new Date().toLocaleString('fr-FR');
+    localStorage.setItem('gist_last_sync', now);
+    updateGistStatus();
+    showGistToast('✅ Restauration réussie depuis Gist');
+  } catch(e) {
+    showGistToast('❌ Erreur : ' + e.message, true);
+  }
+  setGistBusy(false);
+}
+
+function setGistBusy(busy) {
+  const btns = document.querySelectorAll('#statsCard ~ div .btn');
+  btns.forEach(b => b.disabled = busy);
+}
+
+let gistToastTimer = null;
+function showGistToast(msg, isError = false) {
+  let toast = document.getElementById('gistToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'gistToast';
+    toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:8px;font-size:0.85rem;font-weight:500;z-index:999;transition:opacity 0.3s;box-shadow:0 4px 16px rgba(0,0,0,0.2)';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.background = isError ? '#c0392b' : '#3d6b4f';
+  toast.style.color = 'white';
+  toast.style.opacity = '1';
+  clearTimeout(gistToastTimer);
+  gistToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
+}
+
+// Auto-save hook — called after every saveState()
+const _origSaveState = saveState;
+function saveStateWithAutoSync() {
+  _origSaveState();
+  const cfg = gistGetConfig();
+  if (cfg?.autoSave === 'on' && cfg?.pat) {
+    gistSave();
+  }
 }
 
 // ===== UTILS =====
@@ -1301,6 +1540,7 @@ renderUsers();
 initChart();
 renderMeasuresTable();
 populateUserSelect();
+updateGistStatus();
 
 // Restore toggle state
 if (state.showRefM) document.getElementById('toggleM').className = 'toggle active-m';
