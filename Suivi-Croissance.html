@@ -1364,15 +1364,17 @@ function driveLoadLibs() {
 async function driveInit() {
   await driveLoadLibs();
   const hint = localStorage.getItem('drive_hint') || '';
+  const wasConnected = localStorage.getItem('drive_connected') === '1';
+
   driveTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: DRIVE_CLIENT_ID,
     scope: DRIVE_SCOPE,
     hint,
     callback: async (resp) => {
       if (resp.error) {
-        // Silent refresh failed — show sign-in button
-        if (resp.error === 'interaction_required' || resp.error === 'access_denied') {
-          updateDriveStatus(false);
+        // Silent refresh failed — now show the login overlay
+        if (wasConnected) {
+          showLoginOverlay(true);
         }
         return;
       }
@@ -1391,8 +1393,10 @@ async function driveInit() {
       await driveCheckOnConnect();
     }
   });
-  // Silent refresh on page load if previously connected
-  if (localStorage.getItem('drive_connected') === '1') {
+
+  if (wasConnected) {
+    // Show spinner while silent refresh runs
+    showLoadingOverlay();
     driveTokenClient.requestAccessToken({ prompt: '' });
   }
 }
@@ -1563,6 +1567,8 @@ async function driveFetchAndCompare() {
 
 function showLoginOverlay(show) {
   let overlay = document.getElementById('loginOverlay');
+  // Hide loading overlay if showing login
+  if (show) hideLoadingOverlay();
   if (show) {
     if (!overlay) {
       overlay = document.createElement('div');
@@ -1583,7 +1589,29 @@ function showLoginOverlay(show) {
   }
 }
 
+function showLoadingOverlay() {
+  let overlay = document.getElementById('loadingOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'loadingOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(245,240,232,0.97);z-index:300;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px';
+    overlay.innerHTML = `
+      <div style="font-family:'DM Serif Display',serif;font-size:2rem;color:#3d6b4f">📏 Carnet de Croissance</div>
+      <div style="font-size:0.9rem;color:#6b5c42">Connexion à Google Drive…</div>
+      <div style="width:36px;height:36px;border:3px solid #d8cdb8;border-top-color:#3d6b4f;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+      <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+}
+
+function hideLoadingOverlay() {
+  const overlay = document.getElementById('loadingOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
 async function driveCheckOnConnect() {
+  hideLoadingOverlay();
   showLoginOverlay(false);
   driveLastSyncIso = localStorage.getItem('drive_last_sync_iso');
   await driveFetchAndCompare();
@@ -1736,9 +1764,12 @@ renderMeasuresTable();
 populateUserSelect();
 updateDriveStatus(false);
 
-// Show login overlay immediately; driveInit will hide it on successful auth
-showLoginOverlay(true);
-driveInit();
+// If previously connected, attempt silent refresh before showing overlay
+// Only show overlay immediately if never connected before
+if (localStorage.getItem('drive_connected') !== '1') {
+  showLoginOverlay(true);
+}
+driveInit(); // will hide overlay on success, or show it if silent refresh fails
 
 // Restore toggle state
 if (state.showRefM) document.getElementById('toggleM').className = 'toggle active-m';
