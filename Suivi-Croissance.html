@@ -533,7 +533,7 @@
 </div>
 
 <script>
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.1.2';
 
 // ===== DATA =====
 // Users & measures live ONLY in Google Drive.
@@ -1420,6 +1420,8 @@ function exportImage() {
 const DRIVE_FILE_NAME = 'carnet_croissance.json';
 const DRIVE_CLIENT_ID = '68487410553-mp697niljk1ov3sn2ucjfe8ckkqds48p.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+// App-specific prefix — prevents collisions with other apps using same Drive client
+const DRIVE_LS = 'cc.drive.'; // cc.drive.connected, cc.drive.hint, cc.drive.file_id, cc.drive.last_sync, cc.drive.last_sync_iso
 
 let driveTokenClient = null;
 let driveAccessToken = null;
@@ -1444,11 +1446,14 @@ function driveLoadLibs() {
   });
 }
 
+let _driveInitResolve = null;
+const driveInitReady = new Promise(res => { _driveInitResolve = res; });
+
 async function driveInit() {
   await driveLoadLibs();
   // hint stored in both localStorage (persistent) and sessionStorage (fast within-session)
-  const hint = sessionStorage.getItem('drive_hint') || localStorage.getItem('drive_hint') || '';
-  const wasConnected = localStorage.getItem('drive_connected') === '1';
+  const hint = sessionStorage.getItem(DRIVE_LS+'hint') || localStorage.getItem(DRIVE_LS+'hint') || '';
+  const wasConnected = localStorage.getItem(DRIVE_LS+'connected') === '1';
 
   driveTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: DRIVE_CLIENT_ID,
@@ -1457,13 +1462,7 @@ async function driveInit() {
     callback: async (resp) => {
       if (resp.error) {
         hideLoadingOverlay();
-        // Only show login if truly needed (not just a transient error)
-        if (['interaction_required', 'access_denied', 'immediate_failed'].includes(resp.error)) {
-          showLoginOverlay(true);
-        } else if (wasConnected) {
-          // Retry once with select_account as last resort
-          showLoginOverlay(true);
-        }
+        showLoginOverlay(true);
         return;
       }
       driveAccessToken = resp.access_token;
@@ -1475,30 +1474,31 @@ async function driveInit() {
         });
         const ud = await ui.json();
         if (ud.email) {
-          localStorage.setItem('drive_hint', ud.email);
-          sessionStorage.setItem('drive_hint', ud.email);
+          localStorage.setItem(DRIVE_LS+'hint', ud.email);
+          sessionStorage.setItem(DRIVE_LS+'hint', ud.email);
         }
       } catch(e) {}
-      localStorage.setItem('drive_connected', '1');
-      sessionStorage.setItem('drive_connected', '1');
+      localStorage.setItem(DRIVE_LS+'connected', '1');
+      sessionStorage.setItem(DRIVE_LS+'connected', '1');
       updateDriveStatus(true);
       await driveCheckOnConnect();
     }
   });
 
+  // Signal ready so driveSignIn() can proceed
+  _driveInitResolve();
+
   if (wasConnected && hint) {
-    // We have a hint — try fully silent refresh (no UI at all)
     showLoadingOverlay();
     driveTokenClient.requestAccessToken({ prompt: 'none' });
-  } else if (wasConnected && !hint) {
-    // Was connected but lost the hint — show login
+  } else {
     showLoginOverlay(true);
   }
-  // else: never connected — overlay already shown by INIT
 }
 
-function driveSignIn() {
-  if (!driveTokenClient) { driveShowToast('Initialisation en cours…'); return; }
+async function driveSignIn() {
+  await driveInitReady;
+  if (!driveTokenClient) return;
   driveTokenClient.requestAccessToken({ prompt: 'select_account' });
 }
 
@@ -1515,13 +1515,13 @@ function driveSignOut() {
   updateChart();
   populateUserSelect();
   document.getElementById('statsContent').innerHTML = '<div class="empty-state" style="padding:16px">Sélectionnez un utilisateur</div>';
-  localStorage.removeItem('drive_connected');
-  localStorage.removeItem('drive_hint');
-  sessionStorage.removeItem('drive_hint');
-  sessionStorage.removeItem('drive_connected');
-  localStorage.removeItem('drive_file_id');
-  localStorage.removeItem('drive_last_sync_iso');
-  localStorage.removeItem('drive_last_sync');
+  localStorage.removeItem(DRIVE_LS+'connected');
+  localStorage.removeItem(DRIVE_LS+'hint');
+  sessionStorage.removeItem(DRIVE_LS+'hint');
+  sessionStorage.removeItem(DRIVE_LS+'connected');
+  localStorage.removeItem(DRIVE_LS+'file_id');
+  localStorage.removeItem(DRIVE_LS+'last_sync_iso');
+  localStorage.removeItem(DRIVE_LS+'last_sync');
   driveStopPolling();
   updateDriveStatus(false);
   showLoginOverlay(true);
@@ -1537,7 +1537,7 @@ function updateDriveStatus(connected) {
     statusEl.style.color = '#2e7d32';
     signInBtn.style.display = 'none';
     signOutBtn.style.display = 'block';
-    const last = localStorage.getItem('drive_last_sync');
+    const last = localStorage.getItem(DRIVE_LS+'last_sync');
     syncEl.textContent = last ? `Dernière sync : ${last}` : '';
   } else {
     statusEl.innerHTML = 'Non connecté';
@@ -1551,7 +1551,7 @@ function updateDriveStatus(connected) {
 // Find or create the app data file in Drive
 async function driveGetFileId() {
   if (driveFileId) return driveFileId;
-  const cached = localStorage.getItem('drive_file_id');
+  const cached = localStorage.getItem(DRIVE_LS+'file_id');
   if (cached) { driveFileId = cached; return driveFileId; }
   // Search for existing file
   const resp = await fetch(
@@ -1561,7 +1561,7 @@ async function driveGetFileId() {
   const data = await resp.json();
   if (data.files?.length > 0) {
     driveFileId = data.files[0].id;
-    localStorage.setItem('drive_file_id', driveFileId);
+    localStorage.setItem(DRIVE_LS+'file_id', driveFileId);
     return driveFileId;
   }
   return null; // Will be created on first save
@@ -1589,10 +1589,10 @@ async function driveSave() {
       );
       const cd = await cr.json();
       driveFileId = cd.id;
-      localStorage.setItem('drive_file_id', driveFileId);
+      localStorage.setItem(DRIVE_LS+'file_id', driveFileId);
       driveLastSyncIso = cd.modifiedTime;
-      localStorage.setItem('drive_last_sync_iso', driveLastSyncIso);
-      localStorage.setItem('drive_last_sync', new Date(driveLastSyncIso).toLocaleString('fr-FR'));
+      localStorage.setItem(DRIVE_LS+'last_sync_iso', driveLastSyncIso);
+      localStorage.setItem(DRIVE_LS+'last_sync', new Date(driveLastSyncIso).toLocaleString('fr-FR'));
       updateDriveStatus(true);
       return;
     }
@@ -1603,8 +1603,8 @@ async function driveSave() {
     });
     const data = await resp.json();
     driveLastSyncIso = data.modifiedTime;
-    localStorage.setItem('drive_last_sync_iso', driveLastSyncIso);
-    localStorage.setItem('drive_last_sync', new Date(driveLastSyncIso).toLocaleString('fr-FR'));
+    localStorage.setItem(DRIVE_LS+'last_sync_iso', driveLastSyncIso);
+    localStorage.setItem(DRIVE_LS+'last_sync', new Date(driveLastSyncIso).toLocaleString('fr-FR'));
     updateDriveStatus(true);
   } catch(e) {
     driveShowToast('☁️ Sync Drive échouée : ' + e.message, true);
@@ -1628,7 +1628,7 @@ async function driveFetchAndCompare() {
     const meta = await metaResp.json();
     const remoteIso = meta.modifiedTime;
     const remoteSyncedAt = remoteIso ? new Date(remoteIso) : null;
-    const localIso = localStorage.getItem('drive_last_sync_iso');
+    const localIso = localStorage.getItem(DRIVE_LS+'last_sync_iso');
     const localSyncedAt = localIso ? new Date(localIso) : null;
 
     // Always fetch content if state is empty (first load after login)
@@ -1649,8 +1649,8 @@ async function driveFetchAndCompare() {
       state.users = remote.users;
       state.measures = remote.measures;
       driveLastSyncIso = remoteIso;
-      localStorage.setItem('drive_last_sync_iso', remoteIso);
-      localStorage.setItem('drive_last_sync', new Date(remoteIso).toLocaleString('fr-FR'));
+      localStorage.setItem(DRIVE_LS+'last_sync_iso', remoteIso);
+      localStorage.setItem(DRIVE_LS+'last_sync', new Date(remoteIso).toLocaleString('fr-FR'));
       renderUsers(); renderMeasuresTable(); updateChart(); populateUserSelect();
       updateDriveStatus(true);
       return;
@@ -1711,7 +1711,7 @@ function hideLoadingOverlay() {
 async function driveCheckOnConnect() {
   hideLoadingOverlay();
   showLoginOverlay(false);
-  driveLastSyncIso = localStorage.getItem('drive_last_sync_iso');
+  driveLastSyncIso = localStorage.getItem(DRIVE_LS+'last_sync_iso');
   await driveFetchAndCompare();
   driveStartPolling();
 }
@@ -1758,8 +1758,8 @@ async function driveApplyRemote() {
   // Do NOT persist data locally — Drive is the only source of truth
   const iso = remote._canonicalIso || new Date().toISOString();
   driveLastSyncIso = iso;
-  localStorage.setItem('drive_last_sync_iso', iso);
-  localStorage.setItem('drive_last_sync', new Date(iso).toLocaleString('fr-FR'));
+  localStorage.setItem(DRIVE_LS+'last_sync_iso', iso);
+  localStorage.setItem(DRIVE_LS+'last_sync', new Date(iso).toLocaleString('fr-FR'));
   renderUsers(); renderMeasuresTable(); updateChart(); populateUserSelect();
   updateDriveStatus(true);
   driveShowToast('✅ Données mises à jour depuis Google Drive');
@@ -1935,7 +1935,7 @@ updateDriveStatus(false);
 
 // If previously connected, attempt silent refresh before showing overlay
 // Only show overlay immediately if never connected before
-if (localStorage.getItem('drive_connected') !== '1') {
+if (localStorage.getItem(DRIVE_LS+'connected') !== '1') {
   showLoginOverlay(true);
 }
 // If connected in this session already (e.g. same tab reload), sessionStorage has the hint
