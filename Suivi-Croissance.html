@@ -296,11 +296,6 @@
   <h1>📏 Carnet de Croissance <span style="font-family:'DM Sans',sans-serif;font-size:0.75rem;font-weight:400;color:var(--text2);vertical-align:middle;margin-left:4px" id="appVersionDisplay"></span></h1>
   <div class="btn-group">
     <button class="btn" onclick="openAddMeasure()">➕ Mesure</button>
-    <button class="btn" onclick="openAddUser()">👤 Utilisateur</button>
-    <button class="btn" onclick="exportData()">⬇ Exporter données</button>
-    <button class="btn" onclick="exportChart()">🖼 Exporter graphique</button>
-    <button class="btn" onclick="exportImage()">📷 Exporter image</button>
-    <label class="btn" style="cursor:pointer">⬆ Importer données<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
   </div>
 </header>
 
@@ -343,6 +338,16 @@
           <span style="font-style:italic">(privé, invisible dans Drive)</span>
         </div>
         <button class="btn small" style="margin-top:8px;width:100%;font-size:0.76rem" onclick="showDataLocationHelp()">📖 Procédure d'accès manuel</button>
+      </div>
+    </div>
+
+    <div class="card" style="padding:16px">
+      <h2>💾 Données</h2>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <button class="btn" style="width:100%;text-align:left" onclick="exportData()">⬇ Exporter données</button>
+        <button class="btn" style="width:100%;text-align:left" onclick="exportChart()">🖼 Exporter graphique</button>
+        <button class="btn" style="width:100%;text-align:left" onclick="exportImage()">📷 Exporter image</button>
+        <label class="btn" style="width:100%;text-align:left;cursor:pointer">⬆ Importer données<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
       </div>
     </div>
   </div>
@@ -450,7 +455,7 @@
 </div>
 
 <script>
-const APP_VERSION = '1.0.2';
+const APP_VERSION = '1.1.0';
 
 // ===== DATA =====
 // Users & measures live ONLY in Google Drive.
