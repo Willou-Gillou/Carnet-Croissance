@@ -330,10 +330,11 @@
     </div>
 
     <div class="card" style="padding:16px">
-      <h2>☁️ Sync GitHub Gist</h2>
-      <div id="gistStatus" style="font-size:0.8rem;margin-bottom:10px;color:var(--text2)">Non configuré</div>
-      <button class="btn primary" style="width:100%" onclick="openGistModal()">⚙️ Configurer</button>
-      <div id="gistLastSync" style="font-size:0.75rem;color:var(--text2);margin-top:8px;text-align:center"></div>
+      <h2>☁️ Sync Google Drive</h2>
+      <div id="driveStatus" style="font-size:0.8rem;margin-bottom:10px;color:var(--text2)">Non connecté</div>
+      <button class="btn primary" style="width:100%;margin-bottom:6px" id="driveSignInBtn" onclick="driveSignIn()">🔑 Se connecter avec Google</button>
+      <button class="btn danger" style="width:100%;display:none" id="driveSignOutBtn" onclick="driveSignOut()">Déconnecter</button>
+      <div id="driveLastSync" style="font-size:0.75rem;color:var(--text2);margin-top:8px;text-align:center"></div>
     </div>
   </div>
 
@@ -439,31 +440,6 @@
   </div>
 </div>
 
-<!-- Modal Gist -->
-<div class="modal-bg" id="gistModal">
-  <div class="modal">
-    <h3>☁️ Sync GitHub Gist</h3>
-    <p style="font-size:0.83rem;color:var(--text2);margin-bottom:16px;line-height:1.6">
-      Les données sont sauvegardées dans un Gist GitHub privé. Créez un <b>Personal Access Token</b> (PAT) avec le scope <code style="background:var(--bg);padding:1px 5px;border-radius:4px">gist</code> sur
-      <a href="https://github.com/settings/tokens" target="_blank" style="color:var(--accent)">github.com/settings/tokens</a>.
-    </p>
-    <div class="form-row">
-      <label>Personal Access Token (PAT) *</label>
-      <input id="gistPat" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off">
-    </div>
-    <div class="form-row">
-      <label>Gist ID (laisser vide pour en créer un nouveau)</label>
-      <input id="gistId" type="text" placeholder="ex: a1b2c3d4e5f6...">
-    </div>
-    <div id="gistModalError" style="display:none;background:#fdecea;border:1px solid #f5c6cb;border-radius:8px;padding:8px 12px;font-size:0.82rem;color:#c0392b;margin-top:8px"></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal('gistModal')">Annuler</button>
-      <button class="btn danger" onclick="gistClearConfig()" style="margin-right:auto">Effacer config</button>
-      <button class="btn primary" onclick="gistSaveConfig()">Enregistrer</button>
-    </div>
-  </div>
-</div>
-
 <script>
 const APP_VERSION = '1.0.2';
 
@@ -484,41 +460,10 @@ function loadState() {
   } catch(e) {}
 }
 function saveState() {
-  // Also persist gist config inside main state as backup
-  const cfg = gistGetConfig();
-  if (cfg) state._gistBackup = cfg;
   localStorage.setItem('croissance_v2', JSON.stringify(state));
 }
 
-// ===== GIST CONFIG STORAGE =====
-// Stored in dedicated key 'gist_config', with fallback to state._gistBackup
-const GIST_CONFIG_KEY = 'gist_config';
-
-function gistGetConfig() {
-  try {
-    // Primary: dedicated key
-    const raw = localStorage.getItem(GIST_CONFIG_KEY);
-    if (raw) {
-      const cfg = JSON.parse(raw);
-      if (cfg?.pat) return cfg;
-    }
-    // Fallback: backup inside main state
-    if (state._gistBackup?.pat) {
-      // Restore to dedicated key
-      localStorage.setItem(GIST_CONFIG_KEY, JSON.stringify(state._gistBackup));
-      return state._gistBackup;
-    }
-  } catch(e) {}
-  return null;
-}
-function gistSetConfig(cfg) {
-  try {
-    localStorage.setItem(GIST_CONFIG_KEY, JSON.stringify(cfg));
-    // Also update backup in state immediately
-    state._gistBackup = cfg;
-    localStorage.setItem('croissance_v2', JSON.stringify(state));
-  } catch(e) {}
-}
+// ===== GOOGLE DRIVE SYNC =====
 
 // ===== FRENCH REFERENCE CURVES (CIE-INSERM / Sempé) =====
 // Percentiles for height (cm) at each age (years): 3, 10, 25, 50, 75, 90, 97
@@ -1368,199 +1313,261 @@ function exportImage() {
   a.click();
 }
 
-// ===== GIST SYNC =====
-const GIST_FILENAME = 'carnet_croissance.json';
+const DRIVE_FILE_NAME = 'carnet_croissance.json';
+const DRIVE_CLIENT_ID = '68487410553-mp697niljk1ov3sn2ucjfe8ckkqds48p.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 
-function openGistModal() {
-  const cfg = gistGetConfig();
-  document.getElementById('gistPat').value = cfg?.pat || '';
-  document.getElementById('gistId').value = cfg?.gistId || '';
-  document.getElementById('gistModalError').style.display = 'none';
-  document.getElementById('gistModal').classList.add('open');
+let driveTokenClient = null;
+let driveAccessToken = null;
+let driveFileId = null;
+let _drivePendingRemote = null;
+let drivePollInterval = null;
+let driveLastSyncIso = null;
+
+// Load GIS + GAPI scripts dynamically
+function driveLoadLibs() {
+  return new Promise((resolve) => {
+    let gapiReady = false, gisReady = false;
+    const check = () => { if (gapiReady && gisReady) resolve(); };
+    const s1 = document.createElement('script');
+    s1.src = 'https://apis.google.com/js/api.js';
+    s1.onload = () => { gapi.load('client', async () => { await gapi.client.init({}); gapiReady = true; check(); }); };
+    document.head.appendChild(s1);
+    const s2 = document.createElement('script');
+    s2.src = 'https://accounts.google.com/gsi/client';
+    s2.onload = () => { gisReady = true; check(); };
+    document.head.appendChild(s2);
+  });
 }
 
-function gistSaveConfig() {
-  const pat = document.getElementById('gistPat').value.trim();
-  const gistId = document.getElementById('gistId').value.trim();
-  if (!pat) { showGistError('Le PAT est requis.'); return; }
-  gistSetConfig({ pat, gistId });
-  closeModal('gistModal');
-  updateGistStatus();
-  // On first config, check remote immediately
-  gistCheckOnStartup();
-}
-
-function gistClearConfig() {
-  if (!confirm('Effacer la configuration Gist ? Les données locales restent intactes.')) return;
-  localStorage.removeItem(GIST_CONFIG_KEY);
-  localStorage.removeItem('gist_last_sync');
-  localStorage.removeItem('gist_last_sync_iso');
-  delete state._gistBackup;
-  localStorage.setItem('croissance_v2', JSON.stringify(state));
-  closeModal('gistModal');
-  updateGistStatus();
-}
-
-function showGistError(msg) {
-  const el = document.getElementById('gistModalError');
-  el.textContent = msg;
-  el.style.display = 'block';
-}
-
-function updateGistStatus() {
-  const cfg = gistGetConfig();
-  const statusEl = document.getElementById('gistStatus');
-  const syncEl = document.getElementById('gistLastSync');
-  if (!cfg?.pat) {
-    statusEl.innerHTML = 'Non configuré';
-    statusEl.style.color = 'var(--text2)';
-    syncEl.textContent = '';
-  } else {
-    statusEl.innerHTML = cfg.gistId
-      ? `✅ Sync active · <span style="font-family:monospace;font-size:0.75rem">${cfg.gistId.slice(0,8)}…</span>`
-      : '⚙️ PAT configuré — en attente de premier push';
-    statusEl.style.color = cfg.gistId ? '#2e7d32' : 'var(--text2)';
-    const lastSync = localStorage.getItem('gist_last_sync');
-    syncEl.textContent = lastSync ? `Dernière sync : ${lastSync}` : '';
+async function driveInit() {
+  await driveLoadLibs();
+  driveTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: DRIVE_CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: async (resp) => {
+      if (resp.error) { driveShowToast('❌ Connexion échouée : ' + resp.error, true); return; }
+      driveAccessToken = resp.access_token;
+      gapi.client.setToken({ access_token: driveAccessToken });
+      localStorage.setItem('drive_connected', '1');
+      updateDriveStatus(true);
+      await driveCheckOnConnect();
+    }
+  });
+  // Restore session if previously connected
+  if (localStorage.getItem('drive_connected') === '1') {
+    driveTokenClient.requestAccessToken({ prompt: '' }); // Silent refresh
   }
 }
 
-// Push local data to Gist silently after every change
-async function gistSave() {
-  const cfg = gistGetConfig();
-  if (!cfg?.pat) return;
+function driveSignIn() {
+  if (!driveTokenClient) { driveShowToast('Initialisation en cours…'); return; }
+  driveTokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+function driveSignOut() {
+  if (driveAccessToken) google.accounts.oauth2.revoke(driveAccessToken);
+  driveAccessToken = null;
+  driveFileId = null;
+  driveLastSyncIso = null;
+  localStorage.removeItem('drive_connected');
+  localStorage.removeItem('drive_file_id');
+  localStorage.removeItem('drive_last_sync_iso');
+  localStorage.removeItem('drive_last_sync');
+  driveStopPolling();
+  updateDriveStatus(false);
+}
+
+function updateDriveStatus(connected) {
+  const statusEl = document.getElementById('driveStatus');
+  const syncEl = document.getElementById('driveLastSync');
+  const signInBtn = document.getElementById('driveSignInBtn');
+  const signOutBtn = document.getElementById('driveSignOutBtn');
+  if (connected) {
+    statusEl.innerHTML = '✅ Connecté — sync automatique active';
+    statusEl.style.color = '#2e7d32';
+    signInBtn.style.display = 'none';
+    signOutBtn.style.display = 'block';
+    const last = localStorage.getItem('drive_last_sync');
+    syncEl.textContent = last ? `Dernière sync : ${last}` : '';
+  } else {
+    statusEl.innerHTML = 'Non connecté';
+    statusEl.style.color = 'var(--text2)';
+    signInBtn.style.display = 'block';
+    signOutBtn.style.display = 'none';
+    syncEl.textContent = '';
+  }
+}
+
+// Find or create the app data file in Drive
+async function driveGetFileId() {
+  if (driveFileId) return driveFileId;
+  const cached = localStorage.getItem('drive_file_id');
+  if (cached) { driveFileId = cached; return driveFileId; }
+  // Search for existing file
+  const resp = await fetch(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='${DRIVE_FILE_NAME}'&fields=files(id,name,modifiedTime)`,
+    { headers: { Authorization: `Bearer ${driveAccessToken}` } }
+  );
+  const data = await resp.json();
+  if (data.files?.length > 0) {
+    driveFileId = data.files[0].id;
+    localStorage.setItem('drive_file_id', driveFileId);
+    return driveFileId;
+  }
+  return null; // Will be created on first save
+}
+
+// Push data to Drive
+async function driveSave() {
+  if (!driveAccessToken) return;
   try {
-    const payload = {
-      _syncedAt: new Date().toISOString(), // approximate, will be replaced by GitHub's updated_at
-      users: state.users,
-      measures: state.measures
-    };
-    const body = {
-      description: 'Carnet de Croissance – sync automatique',
-      public: false,
-      files: { [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) } }
-    };
-    const url = cfg.gistId ? `https://api.github.com/gists/${cfg.gistId}` : 'https://api.github.com/gists';
-    const method = cfg.gistId ? 'PATCH' : 'POST';
+    const payload = JSON.stringify({ users: state.users, measures: state.measures }, null, 2);
+    const fileId = await driveGetFileId();
+    let url, method;
+    if (fileId) {
+      url = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,modifiedTime`;
+      method = 'PATCH';
+    } else {
+      // Create with metadata
+      const meta = { name: DRIVE_FILE_NAME, parents: ['appDataFolder'] };
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+      form.append('file', new Blob([payload], { type: 'application/json' }));
+      const cr = await fetch(
+        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime',
+        { method: 'POST', headers: { Authorization: `Bearer ${driveAccessToken}` }, body: form }
+      );
+      const cd = await cr.json();
+      driveFileId = cd.id;
+      localStorage.setItem('drive_file_id', driveFileId);
+      driveLastSyncIso = cd.modifiedTime;
+      localStorage.setItem('drive_last_sync_iso', driveLastSyncIso);
+      localStorage.setItem('drive_last_sync', new Date(driveLastSyncIso).toLocaleString('fr-FR'));
+      updateDriveStatus(true);
+      return;
+    }
     const resp = await fetch(url, {
       method,
-      headers: { 'Authorization': `Bearer ${cfg.pat}`, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github+json' },
-      body: JSON.stringify(body)
+      headers: { Authorization: `Bearer ${driveAccessToken}`, 'Content-Type': 'application/json' },
+      body: payload
     });
-    if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.message || `HTTP ${resp.status}`); }
     const data = await resp.json();
-    if (!cfg.gistId) { cfg.gistId = data.id; gistSetConfig(cfg); }
-    // Use GitHub's authoritative updated_at as the canonical timestamp
-    const canonicalIso = data.updated_at || new Date().toISOString();
-    localStorage.setItem('gist_last_sync_iso', canonicalIso);
-    localStorage.setItem('gist_last_sync', new Date(canonicalIso).toLocaleString('fr-FR'));
-    updateGistStatus();
+    driveLastSyncIso = data.modifiedTime;
+    localStorage.setItem('drive_last_sync_iso', driveLastSyncIso);
+    localStorage.setItem('drive_last_sync', new Date(driveLastSyncIso).toLocaleString('fr-FR'));
+    updateDriveStatus(true);
   } catch(e) {
-    showGistToast('☁️ Sync Gist échouée : ' + e.message, true);
+    driveShowToast('☁️ Sync Drive échouée : ' + e.message, true);
   }
 }
 
-// On startup: fetch Gist, compare timestamps, prompt if remote is newer. NEVER push on startup.
-async function gistCheckOnStartup() {
-  const cfg = gistGetConfig();
-  if (!cfg?.pat || !cfg?.gistId) return;
+// Fetch remote data and compare with local
+async function driveFetchAndCompare() {
+  if (!driveAccessToken) return;
   try {
-    const resp = await fetch(`https://api.github.com/gists/${cfg.gistId}`, {
-      headers: { 'Authorization': `Bearer ${cfg.pat}`, 'Accept': 'application/vnd.github+json' }
-    });
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const file = data.files?.[GIST_FILENAME];
-    if (!file) return;
-    let content = file.content;
-    if (file.truncated) { const raw = await fetch(file.raw_url); content = await raw.text(); }
-    const remote = JSON.parse(content);
-    if (!remote.users || !remote.measures) return;
-
-    // Use GitHub's authoritative updated_at as canonical timestamp
-    const remoteIso = data.updated_at;
+    const fileId = await driveGetFileId();
+    if (!fileId) { await driveSave(); return; } // No remote file yet
+    // Get modifiedTime first (cheap metadata call)
+    const metaResp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime`,
+      { headers: { Authorization: `Bearer ${driveAccessToken}` } }
+    );
+    const meta = await metaResp.json();
+    const remoteIso = meta.modifiedTime;
     const remoteSyncedAt = remoteIso ? new Date(remoteIso) : null;
-    const localIso = localStorage.getItem('gist_last_sync_iso');
+    const localIso = localStorage.getItem('drive_last_sync_iso');
     const localSyncedAt = localIso ? new Date(localIso) : null;
-
-    if (remoteSyncedAt && (!localSyncedAt || remoteSyncedAt > localSyncedAt)) {
-      showGistUpdatePrompt(remote, remoteSyncedAt);
-    }
+    if (!remoteSyncedAt || (localSyncedAt && remoteSyncedAt <= localSyncedAt)) return; // Up to date
+    // Remote is newer — fetch content
+    const contentResp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: `Bearer ${driveAccessToken}` } }
+    );
+    const remote = await contentResp.json();
+    if (!remote.users || !remote.measures) return;
+    const existing = document.getElementById('driveUpdatePrompt');
+    if (existing && existing.style.display !== 'none') return; // Already showing
+    showDriveUpdatePrompt(remote, remoteSyncedAt);
   } catch(e) { /* silently ignore */ }
 }
 
-let _pendingRemote = null;
+async function driveCheckOnConnect() {
+  driveLastSyncIso = localStorage.getItem('drive_last_sync_iso');
+  await driveFetchAndCompare();
+  driveStartPolling();
+}
 
-function showGistUpdatePrompt(remote, remoteSyncedAt) {
-  _pendingRemote = { ...remote, _canonicalIso: remoteSyncedAt.toISOString() };
+function showDriveUpdatePrompt(remote, remoteSyncedAt) {
+  _drivePendingRemote = { ...remote, _canonicalIso: remoteSyncedAt.toISOString() };
   const dateStr = remoteSyncedAt.toLocaleString('fr-FR');
-  const localUsers = state.users.length;
-  const localMeasures = state.measures.length;
-  const remoteUsers = remote.users.length;
-  const remoteMeasures = remote.measures.length;
-
-  let prompt = document.getElementById('gistUpdatePrompt');
+  let prompt = document.getElementById('driveUpdatePrompt');
   if (!prompt) {
     prompt = document.createElement('div');
-    prompt.id = 'gistUpdatePrompt';
+    prompt.id = 'driveUpdatePrompt';
     prompt.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center';
     document.body.appendChild(prompt);
   }
   prompt.innerHTML = `
-    <div style="background:#fffdf7;border-radius:12px;padding:28px;width:400px;max-width:95vw;box-shadow:0 8px 40px rgba(0,0,0,0.25)">
+    <div style="background:#fffdf7;border-radius:12px;padding:28px;width:420px;max-width:95vw;box-shadow:0 8px 40px rgba(0,0,0,0.25)">
       <div style="font-family:'DM Serif Display',serif;font-size:1.2rem;color:#3d6b4f;margin-bottom:12px">☁️ Mise à jour disponible</div>
       <p style="font-size:0.85rem;color:#6b5c42;line-height:1.7;margin-bottom:16px">
-        Une version plus récente de vos données est disponible sur GitHub Gist.<br>
-        <b>Gist :</b> ${remoteUsers} utilisateur(s), ${remoteMeasures} mesure(s) — <i>${dateStr}</i><br>
-        <b>Local :</b> ${localUsers} utilisateur(s), ${localMeasures} mesure(s)
+        Une version plus récente de vos données est disponible sur Google Drive.<br>
+        <b>Drive :</b> ${remote.users.length} utilisateur(s), ${remote.measures.length} mesure(s) — <i>${dateStr}</i><br>
+        <b>Local :</b> ${state.users.length} utilisateur(s), ${state.measures.length} mesure(s)
       </p>
       <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button class="btn" onclick="gistKeepLocal()">Garder local</button>
-        <button class="btn primary" onclick="gistApplyRemote()">Mettre à jour</button>
+        <button class="btn" onclick="driveKeepLocal()">Garder local</button>
+        <button class="btn primary" onclick="driveApplyRemote()">Mettre à jour</button>
       </div>
     </div>`;
   prompt.style.display = 'flex';
 }
 
-function gistKeepLocal() {
-  document.getElementById('gistUpdatePrompt').style.display = 'none';
-  _pendingRemote = null;
-  // Mark local as the authoritative version by pushing it to Gist
-  gistSave();
+function driveKeepLocal() {
+  document.getElementById('driveUpdatePrompt').style.display = 'none';
+  _drivePendingRemote = null;
+  driveSave(); // Push local as authoritative
 }
 
-async function gistApplyRemote() {
-  const remote = _pendingRemote;
-  _pendingRemote = null;
+async function driveApplyRemote() {
+  const remote = _drivePendingRemote;
+  _drivePendingRemote = null;
   if (!remote) return;
-  document.getElementById('gistUpdatePrompt').style.display = 'none';
+  document.getElementById('driveUpdatePrompt').style.display = 'none';
   state.users = remote.users;
   state.measures = remote.measures;
-  // Preserve gist config backup when writing state
-  const cfg = gistGetConfig();
-  if (cfg) state._gistBackup = cfg;
-  localStorage.setItem('croissance_v2', JSON.stringify({ ...state }));
-  const syncIso = remote._canonicalIso || remote._syncedAt || new Date().toISOString();
-  localStorage.setItem('gist_last_sync_iso', syncIso);
-  localStorage.setItem('gist_last_sync', new Date(syncIso).toLocaleString('fr-FR'));
-  renderUsers();
-  renderMeasuresTable();
-  updateChart();
-  populateUserSelect();
-  updateGistStatus();
-  showGistToast('✅ Données mises à jour depuis Gist');
+  saveState();
+  const iso = remote._canonicalIso || new Date().toISOString();
+  driveLastSyncIso = iso;
+  localStorage.setItem('drive_last_sync_iso', iso);
+  localStorage.setItem('drive_last_sync', new Date(iso).toLocaleString('fr-FR'));
+  renderUsers(); renderMeasuresTable(); updateChart(); populateUserSelect();
+  updateDriveStatus(true);
+  driveShowToast('✅ Données mises à jour depuis Google Drive');
 }
 
-function setGistBusy(busy) {
-  // kept for compatibility
+function driveStartPolling() {
+  if (drivePollInterval) return;
+  drivePollInterval = setInterval(() => {
+    if (document.visibilityState === 'visible' && driveAccessToken) driveFetchAndCompare();
+  }, 15000);
 }
 
-let gistToastTimer = null;
-function showGistToast(msg, isError = false) {
-  let toast = document.getElementById('gistToast');
+function driveStopPolling() {
+  if (drivePollInterval) { clearInterval(drivePollInterval); drivePollInterval = null; }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && driveAccessToken) driveFetchAndCompare();
+});
+
+let driveToastTimer = null;
+function driveShowToast(msg, isError = false) {
+  let toast = document.getElementById('driveToast');
   if (!toast) {
     toast = document.createElement('div');
-    toast.id = 'gistToast';
+    toast.id = 'driveToast';
     toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:8px;font-size:0.85rem;font-weight:500;z-index:999;transition:opacity 0.3s;box-shadow:0 4px 16px rgba(0,0,0,0.2)';
     document.body.appendChild(toast);
   }
@@ -1568,21 +1575,15 @@ function showGistToast(msg, isError = false) {
   toast.style.background = isError ? '#c0392b' : '#3d6b4f';
   toast.style.color = 'white';
   toast.style.opacity = '1';
-  clearTimeout(gistToastTimer);
-  gistToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
+  clearTimeout(driveToastTimer);
+  driveToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
 }
 
-// Auto-save: push to Gist after every local save
+// Auto-sync after every local save
 const _origSaveState = saveState;
 function saveStateWithAutoSync() {
   _origSaveState();
-  const cfg = gistGetConfig();
-  if (cfg?.pat) {
-    // Store ISO timestamp of this local save
-    const iso = new Date().toISOString();
-    localStorage.setItem('gist_last_sync_iso', iso);
-    gistSave();
-  }
+  if (driveAccessToken) driveSave();
 }
 
 // ===== UTILS =====
@@ -1604,60 +1605,8 @@ renderUsers();
 initChart();
 renderMeasuresTable();
 populateUserSelect();
-updateGistStatus();
-gistCheckOnStartup();
-
-// Poll every 15s when tab is visible
-let gistPollInterval = null;
-
-function gistStartPolling() {
-  if (gistPollInterval) return;
-  gistPollInterval = setInterval(async () => {
-    const cfg = gistGetConfig();
-    if (!cfg?.pat || !cfg?.gistId) return;
-    try {
-      const resp = await fetch(`https://api.github.com/gists/${cfg.gistId}`, {
-        headers: { 'Authorization': `Bearer ${cfg.pat}`, 'Accept': 'application/vnd.github+json' }
-      });
-      if (!resp.ok) return;
-      const data = await resp.json();
-      const file = data.files?.[GIST_FILENAME];
-      if (!file) return;
-      let content = file.content;
-      if (file.truncated) { const raw = await fetch(file.raw_url); content = await raw.text(); }
-      const remote = JSON.parse(content);
-      if (!remote.users || !remote.measures) return;
-      // Use GitHub's authoritative updated_at
-      const remoteIso = data.updated_at;
-      const remoteSyncedAt = remoteIso ? new Date(remoteIso) : null;
-      if (!remoteSyncedAt) return;
-      const localIso = localStorage.getItem('gist_last_sync_iso');
-      const localSyncedAt = localIso ? new Date(localIso) : null;
-      if (!localSyncedAt || remoteSyncedAt > localSyncedAt) {
-        // Only show prompt if not already visible
-        const existing = document.getElementById('gistUpdatePrompt');
-        if (!existing || existing.style.display === 'none') {
-          showGistUpdatePrompt(remote, remoteSyncedAt);
-        }
-      }
-    } catch(e) { /* silently ignore */ }
-  }, 15000);
-}
-
-function gistStopPolling() {
-  if (gistPollInterval) { clearInterval(gistPollInterval); gistPollInterval = null; }
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    gistStartPolling();
-  } else {
-    gistStopPolling();
-  }
-});
-
-// Start polling immediately if tab is visible
-if (document.visibilityState === 'visible') gistStartPolling();
+updateDriveStatus(localStorage.getItem('drive_connected') === '1');
+driveInit();
 
 // Restore toggle state
 if (state.showRefM) document.getElementById('toggleM').className = 'toggle active-m';
