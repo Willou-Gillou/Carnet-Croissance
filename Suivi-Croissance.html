@@ -258,25 +258,84 @@
   @media (max-width: 768px) {
     .layout { grid-template-columns: 1fr; height: auto; }
     .sidebar {
+      display: none; /* hidden on mobile, accessed via bottom tabs */
       height: auto;
       position: static;
       border-right: none;
       border-bottom: 1px solid var(--border);
     }
-    .main { padding: 16px; gap: 16px; }
+    .main { padding: 12px; gap: 12px; padding-bottom: 72px; }
     .chart-wrap { height: clamp(240px, 60vw, 380px); }
     header { padding: 12px 16px; }
-    header h1 { font-size: 1.2rem; }
+    header h1 { font-size: 1.1rem; }
     .btn { padding: 7px 12px; font-size: 0.8rem; }
     .stat-grid { grid-template-columns: repeat(2, 1fr); }
+
+    /* Mobile bottom tab bar */
+    .mobile-tabs {
+      display: flex;
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      z-index: 50;
+      height: 60px;
+    }
+    .mobile-tab {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      font-size: 0.65rem;
+      font-weight: 500;
+      color: var(--text2);
+      cursor: pointer;
+      border: none;
+      background: none;
+      padding: 0;
+      transition: color 0.15s;
+    }
+    .mobile-tab.active { color: var(--accent); }
+    .mobile-tab .tab-icon { font-size: 1.3rem; }
+
+    /* Mobile drawer */
+    .mobile-drawer {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+    }
+    .mobile-drawer.open { display: block; }
+    .mobile-drawer-bg {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+    }
+    .mobile-drawer-panel {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: min(320px, 88vw);
+      background: var(--surface);
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 4px 0 24px rgba(0,0,0,0.15);
+    }
+  }
+
+  @media (min-width: 769px) {
+    .mobile-tabs { display: none; }
+    .mobile-drawer { display: none !important; }
   }
 
   @media (max-width: 480px) {
-    .main { padding: 12px; gap: 12px; }
-    .card { padding: 14px; }
-    header .btn-group { gap: 6px; }
-    .btn { padding: 6px 10px; font-size: 0.78rem; }
-    .chart-wrap { height: clamp(220px, 70vw, 320px); }
+    .main { padding: 10px; gap: 10px; padding-bottom: 72px; }
+    .card { padding: 12px; }
+    .chart-wrap { height: clamp(220px, 65vw, 320px); }
   }
 
   .empty-state {
@@ -319,11 +378,6 @@
       </div>
     </div>
 
-    <div class="card" style="padding:16px" id="statsCard">
-      <h2>📈 Statistiques</h2>
-      <div id="statsContent"><div class="empty-state" style="padding:16px"><div>Sélectionnez un utilisateur</div></div></div>
-    </div>
-
     <div class="card" style="padding:16px">
       <h2>☁️ Sync Google Drive</h2>
       <div id="driveStatus" style="font-size:0.8rem;margin-bottom:10px;color:var(--text2)">Non connecté</div>
@@ -362,11 +416,35 @@
       </div>
     </div>
 
+    <div class="card" id="statsCard">
+      <h2>📈 Statistiques</h2>
+      <div id="statsContent"><div class="empty-state" style="padding:16px"><div>Sélectionnez un utilisateur</div></div></div>
+    </div>
+
     <div class="card" id="measuresCard">
       <h2>📋 Toutes les mesures</h2>
       <div class="table-scroll"><div id="measuresTable"></div></div>
     </div>
   </div>
+</div>
+
+<!-- Mobile bottom tab bar -->
+<nav class="mobile-tabs">
+  <button class="mobile-tab active" id="tab-graph" onclick="mobileTab('graph')">
+    <span class="tab-icon">📈</span>Graphique
+  </button>
+  <button class="mobile-tab" id="tab-users" onclick="mobileTab('users')">
+    <span class="tab-icon">👥</span>Enfants
+  </button>
+  <button class="mobile-tab" id="tab-settings" onclick="mobileTab('settings')">
+    <span class="tab-icon">⚙️</span>Réglages
+  </button>
+</nav>
+
+<!-- Mobile drawer -->
+<div class="mobile-drawer" id="mobileDrawer">
+  <div class="mobile-drawer-bg" onclick="mobileDrawerClose()"></div>
+  <div class="mobile-drawer-panel" id="mobileDrawerPanel"></div>
 </div>
 
 <!-- Modal Utilisateur -->
@@ -455,7 +533,7 @@
 </div>
 
 <script>
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.1.1';
 
 // ===== DATA =====
 // Users & measures live ONLY in Google Drive.
@@ -1761,6 +1839,77 @@ function showDataLocationHelp() {
     document.body.appendChild(m);
   }
   m.classList.add('open');
+}
+
+// ===== MOBILE TABS =====
+function mobileTab(tab) {
+  // Update active tab
+  document.querySelectorAll('.mobile-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + tab)?.classList.add('active');
+
+  if (tab === 'graph') {
+    mobileDrawerClose();
+    return;
+  }
+
+  const panel = document.getElementById('mobileDrawerPanel');
+
+  if (tab === 'users') {
+    // Clone users card + ref card from sidebar
+    panel.innerHTML = `
+      <div style="font-family:'DM Serif Display',serif;font-size:1.2rem;color:var(--accent);margin-bottom:16px">👥 Utilisateurs</div>
+      <div class="user-list" id="mobileUserList"></div>
+      <button class="btn primary" style="width:100%;margin-top:12px" onclick="openAddUser()">+ Ajouter</button>
+      <div style="margin-top:20px;font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--accent);margin-bottom:10px">📊 Référence</div>
+      <div style="font-size:0.82rem;color:var(--text2);margin-bottom:10px">Courbes CIE-INSERM (M. Sempé)</div>
+      <div class="toggle-group" style="flex-wrap:wrap;gap:6px">
+        <button class="toggle" id="toggleM_m" onclick="toggleRef('m');syncMobileToggles()">♂ Garçon</button>
+        <button class="toggle" id="toggleF_m" onclick="toggleRef('f');syncMobileToggles()">♀ Fille</button>
+      </div>`;
+    // Sync toggle states
+    syncMobileToggles();
+    // Populate user list
+    const ml = document.getElementById('mobileUserList');
+    ml.innerHTML = document.getElementById('userList').innerHTML;
+  }
+
+  if (tab === 'settings') {
+    panel.innerHTML = `
+      <div style="font-family:'DM Serif Display',serif;font-size:1.2rem;color:var(--accent);margin-bottom:16px">☁️ Sync Google Drive</div>
+      <div id="mDriveStatus" style="font-size:0.8rem;margin-bottom:10px;color:var(--text2)"></div>
+      <button class="btn primary" style="width:100%;margin-bottom:6px" id="mDriveSignInBtn" onclick="driveSignIn()">🔑 Se connecter avec Google</button>
+      <button class="btn danger" style="width:100%;display:none" id="mDriveSignOutBtn" onclick="driveSignOut()">Déconnecter</button>
+      <div id="mDriveLastSync" style="font-size:0.75rem;color:var(--text2);margin-top:8px;text-align:center"></div>
+      <div style="margin-top:20px;font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--accent);margin-bottom:12px">💾 Données</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" style="width:100%;text-align:left" onclick="exportData()">⬇ Exporter données</button>
+        <button class="btn" style="width:100%;text-align:left" onclick="exportChart()">🖼 Exporter graphique</button>
+        <button class="btn" style="width:100%;text-align:left" onclick="exportImage()">📷 Exporter image</button>
+        <label class="btn" style="width:100%;text-align:left;cursor:pointer">⬆ Importer données<input type="file" accept=".json" style="display:none" onchange="importData(event)"></label>
+      </div>`;
+    // Sync drive status in drawer
+    const statusEl = document.getElementById('driveStatus');
+    document.getElementById('mDriveStatus').innerHTML = statusEl.innerHTML;
+    document.getElementById('mDriveStatus').style.color = statusEl.style.color;
+    const isConnected = !!driveAccessToken;
+    document.getElementById('mDriveSignInBtn').style.display = isConnected ? 'none' : 'block';
+    document.getElementById('mDriveSignOutBtn').style.display = isConnected ? 'block' : 'none';
+    const lastSync = document.getElementById('driveLastSync').textContent;
+    document.getElementById('mDriveLastSync').textContent = lastSync;
+  }
+
+  document.getElementById('mobileDrawer').classList.add('open');
+}
+
+function mobileDrawerClose() {
+  document.getElementById('mobileDrawer').classList.remove('open');
+}
+
+function syncMobileToggles() {
+  const tm = document.getElementById('toggleM_m');
+  const tf = document.getElementById('toggleF_m');
+  if (tm) tm.className = 'toggle' + (state.showRefM ? ' active-m' : '');
+  if (tf) tf.className = 'toggle' + (state.showRefF ? ' active-f' : '');
 }
 
 // ===== UTILS =====
