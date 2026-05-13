@@ -335,6 +335,15 @@
       <button class="btn primary" style="width:100%;margin-bottom:6px" id="driveSignInBtn" onclick="driveSignIn()">🔑 Se connecter avec Google</button>
       <button class="btn danger" style="width:100%;display:none" id="driveSignOutBtn" onclick="driveSignOut()">Déconnecter</button>
       <div id="driveLastSync" style="font-size:0.75rem;color:var(--text2);margin-top:8px;text-align:center"></div>
+      <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+        <div style="font-size:0.78rem;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em">📂 Où sont mes données ?</div>
+        <div style="font-size:0.78rem;color:var(--text2);line-height:1.7">
+          Fichier : <code style="background:var(--bg);padding:1px 5px;border-radius:4px;font-size:0.75rem">carnet_croissance.json</code><br>
+          Espace : <b>AppData</b> de votre Google Drive<br>
+          <span style="font-style:italic">(privé, invisible dans Drive)</span>
+        </div>
+        <button class="btn small" style="margin-top:8px;width:100%;font-size:0.76rem" onclick="showDataLocationHelp()">📖 Procédure d'accès manuel</button>
+      </div>
     </div>
   </div>
 
@@ -444,6 +453,8 @@
 const APP_VERSION = '1.0.2';
 
 // ===== DATA =====
+// Users & measures live ONLY in Google Drive.
+// localStorage only stores UI preferences (ref toggles) and Drive session metadata.
 let state = {
   users: [],
   measures: [],
@@ -454,13 +465,23 @@ let state = {
 };
 
 function loadState() {
+  // Only restore UI preferences from localStorage, never user data
   try {
-    const s = localStorage.getItem('croissance_v2');
-    if (s) state = { ...state, ...JSON.parse(s) };
+    const s = localStorage.getItem('croissance_prefs');
+    if (s) {
+      const prefs = JSON.parse(s);
+      state.showRefM = !!prefs.showRefM;
+      state.showRefF = !!prefs.showRefF;
+    }
   } catch(e) {}
 }
+
 function saveState() {
-  localStorage.setItem('croissance_v2', JSON.stringify(state));
+  // Only persist UI preferences locally
+  localStorage.setItem('croissance_prefs', JSON.stringify({
+    showRefM: state.showRefM,
+    showRefF: state.showRefF
+  }));
 }
 
 // ===== GOOGLE DRIVE SYNC =====
@@ -1386,6 +1407,14 @@ function driveSignOut() {
   driveAccessToken = null;
   driveFileId = null;
   driveLastSyncIso = null;
+  // Clear all user data from memory
+  state.users = [];
+  state.measures = [];
+  renderUsers();
+  renderMeasuresTable();
+  updateChart();
+  populateUserSelect();
+  document.getElementById('statsContent').innerHTML = '<div class="empty-state" style="padding:16px">Sélectionnez un utilisateur</div>';
   localStorage.removeItem('drive_connected');
   localStorage.removeItem('drive_hint');
   localStorage.removeItem('drive_file_id');
@@ -1393,6 +1422,7 @@ function driveSignOut() {
   localStorage.removeItem('drive_last_sync');
   driveStopPolling();
   updateDriveStatus(false);
+  showLoginOverlay(true);
 }
 
 function updateDriveStatus(connected) {
@@ -1484,7 +1514,10 @@ async function driveFetchAndCompare() {
   if (!driveAccessToken) return;
   try {
     const fileId = await driveGetFileId();
-    if (!fileId) { await driveSave(); return; } // No remote file yet
+    if (!fileId) {
+      // No remote file yet — nothing to load, start fresh
+      return;
+    }
     // Get modifiedTime first (cheap metadata call)
     const metaResp = await fetch(
       `https://www.googleapis.com/drive/v3/files/${fileId}?fields=modifiedTime`,
@@ -1495,21 +1528,63 @@ async function driveFetchAndCompare() {
     const remoteSyncedAt = remoteIso ? new Date(remoteIso) : null;
     const localIso = localStorage.getItem('drive_last_sync_iso');
     const localSyncedAt = localIso ? new Date(localIso) : null;
-    if (!remoteSyncedAt || (localSyncedAt && remoteSyncedAt <= localSyncedAt)) return; // Up to date
-    // Remote is newer — fetch content
+
+    // Always fetch content if state is empty (first load after login)
+    const stateEmpty = state.users.length === 0 && state.measures.length === 0;
+
+    if (!stateEmpty && remoteSyncedAt && localSyncedAt && remoteSyncedAt <= localSyncedAt) return; // Up to date
+
+    // Fetch content
     const contentResp = await fetch(
       `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
       { headers: { Authorization: `Bearer ${driveAccessToken}` } }
     );
     const remote = await contentResp.json();
     if (!remote.users || !remote.measures) return;
+
+    if (stateEmpty) {
+      // Silent load — no prompt needed
+      state.users = remote.users;
+      state.measures = remote.measures;
+      driveLastSyncIso = remoteIso;
+      localStorage.setItem('drive_last_sync_iso', remoteIso);
+      localStorage.setItem('drive_last_sync', new Date(remoteIso).toLocaleString('fr-FR'));
+      renderUsers(); renderMeasuresTable(); updateChart(); populateUserSelect();
+      updateDriveStatus(true);
+      return;
+    }
+
+    // Data already in memory and remote is newer — prompt
     const existing = document.getElementById('driveUpdatePrompt');
-    if (existing && existing.style.display !== 'none') return; // Already showing
+    if (existing && existing.style.display !== 'none') return;
     showDriveUpdatePrompt(remote, remoteSyncedAt);
   } catch(e) { /* silently ignore */ }
 }
 
+function showLoginOverlay(show) {
+  let overlay = document.getElementById('loginOverlay');
+  if (show) {
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'loginOverlay';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(245,240,232,0.97);z-index:300;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px';
+      overlay.innerHTML = `
+        <div style="text-align:center;max-width:380px;padding:0 24px">
+          <div style="font-family:'DM Serif Display',serif;font-size:2rem;color:#3d6b4f;margin-bottom:8px">📏 Carnet de Croissance</div>
+          <div style="font-size:0.9rem;color:#6b5c42;margin-bottom:28px;line-height:1.6">Vos données sont stockées exclusivement sur Google Drive.<br>Connectez-vous pour y accéder.</div>
+          <button class="btn primary" style="padding:12px 28px;font-size:1rem" onclick="driveSignIn()">🔑 Se connecter avec Google</button>
+          <div id="loginStatus" style="margin-top:16px;font-size:0.82rem;color:#6b5c42"></div>
+        </div>`;
+      document.body.appendChild(overlay);
+    }
+    overlay.style.display = 'flex';
+  } else {
+    if (overlay) overlay.style.display = 'none';
+  }
+}
+
 async function driveCheckOnConnect() {
+  showLoginOverlay(false);
   driveLastSyncIso = localStorage.getItem('drive_last_sync_iso');
   await driveFetchAndCompare();
   driveStartPolling();
@@ -1554,7 +1629,7 @@ async function driveApplyRemote() {
   document.getElementById('driveUpdatePrompt').style.display = 'none';
   state.users = remote.users;
   state.measures = remote.measures;
-  saveState();
+  // Do NOT persist data locally — Drive is the only source of truth
   const iso = remote._canonicalIso || new Date().toISOString();
   driveLastSyncIso = iso;
   localStorage.setItem('drive_last_sync_iso', iso);
@@ -1596,11 +1671,48 @@ function driveShowToast(msg, isError = false) {
   driveToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
 }
 
-// Auto-sync after every local save
+// Auto-sync: save UI prefs locally, push data to Drive only
 const _origSaveState = saveState;
 function saveStateWithAutoSync() {
-  _origSaveState();
+  _origSaveState(); // saves prefs only
   if (driveAccessToken) driveSave();
+}
+
+function showDataLocationHelp() {
+  let m = document.getElementById('dataLocationModal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'dataLocationModal';
+    m.className = 'modal-bg';
+    m.innerHTML = `
+      <div class="modal" style="max-width:480px">
+        <h3>📂 Accès manuel aux données</h3>
+        <p style="font-size:0.84rem;color:var(--text2);line-height:1.8;margin-bottom:8px">
+          Vos données sont stockées dans l'espace <b>AppData</b> de Google Drive — un espace privé invisible dans l'interface Drive normale. Voici comment y accéder manuellement :
+        </p>
+        <div style="background:var(--bg);border-radius:8px;padding:14px;font-size:0.82rem;line-height:2;margin-bottom:12px">
+          <b>Via l'API Google Drive (méthode technique)</b><br>
+          1. Allez sur <a href="https://developers.google.com/oauthplayground" target="_blank" style="color:var(--accent)">OAuth 2.0 Playground</a><br>
+          2. Autorisez le scope <code style="background:#fff;padding:1px 4px;border-radius:3px">drive.appdata</code><br>
+          3. Appelez : <code style="background:#fff;padding:1px 4px;border-radius:3px;font-size:0.75rem">GET https://www.googleapis.com/drive/v3/files?spaces=appDataFolder</code><br>
+          4. Repérez <code style="background:#fff;padding:1px 4px;border-radius:3px">carnet_croissance.json</code> et copiez son <code>id</code><br>
+          5. Téléchargez : <code style="background:#fff;padding:1px 4px;border-radius:3px;font-size:0.75rem">GET .../files/{id}?alt=media</code>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:14px;font-size:0.82rem;line-height:2">
+          <b>Via l'export intégré (méthode simple)</b><br>
+          1. Connectez-vous à l'application<br>
+          2. Cliquez <b>"⬇ Exporter données"</b> dans la barre du haut<br>
+          3. Un fichier <code style="background:#fff;padding:1px 4px;border-radius:3px">croissance_YYYY-MM-DD.json</code> est téléchargé<br>
+          4. Ce fichier contient tous vos utilisateurs et mesures en JSON lisible
+        </div>
+        <div class="modal-actions">
+          <button class="btn primary" onclick="document.getElementById('dataLocationModal').classList.remove('open')">Fermer</button>
+        </div>
+      </div>`;
+    m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+    document.body.appendChild(m);
+  }
+  m.classList.add('open');
 }
 
 // ===== UTILS =====
@@ -1616,13 +1728,16 @@ document.querySelectorAll('.modal-bg').forEach(bg => {
 });
 
 // ===== INIT =====
-loadState();
+loadState(); // only prefs
 document.getElementById('appVersionDisplay').textContent = 'v' + APP_VERSION;
 renderUsers();
 initChart();
 renderMeasuresTable();
 populateUserSelect();
-updateDriveStatus(localStorage.getItem('drive_connected') === '1');
+updateDriveStatus(false);
+
+// Show login overlay immediately; driveInit will hide it on successful auth
+showLoginOverlay(true);
 driveInit();
 
 // Restore toggle state
