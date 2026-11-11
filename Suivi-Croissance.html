@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Carnet de Croissance v1.1.6</title>
+<title>Carnet de Croissance v1.1.7</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -193,23 +193,30 @@
   .measures-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
   .measures-table tr:hover td { background: var(--bg); }
 
-  .chart-info { display: none; }
-  @media (max-width: 768px) {
-    .chart-info {
-      display: block;
-      margin-top: 8px;
-      padding: 8px 12px;
-      min-height: 2.6em;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 0.82rem;
-      color: var(--text2);
-    }
-    .chart-info b { color: var(--text); }
-    .chart-info .ci-row { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; }
-    .chart-info .ci-dot { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  .chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin-top: 10px;
+    font-size: 0.82rem;
+    color: var(--text);
   }
+  .chart-legend:empty { display: none; }
+  .chart-legend .cl-item { display: inline-flex; align-items: center; gap: 6px; }
+  .chart-legend .cl-line { width: 22px; height: 0; border-top: 3px solid; border-radius: 2px; }
+  .chart-info {
+    margin-top: 8px;
+    padding: 8px 12px;
+    min-height: 2.6em;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.82rem;
+    color: var(--text2);
+  }
+  .chart-info b { color: var(--text); }
+  .chart-info .ci-row { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; }
+  .chart-info .ci-dot { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
 
   .tag {
     display: inline-block;
@@ -432,7 +439,8 @@
       <div class="chart-wrap">
         <canvas id="growthChart"></canvas>
       </div>
-      <div class="chart-info" id="chartInfo">Touchez le graphique pour voir les valeurs</div>
+      <div class="chart-legend" id="chartLegend"></div>
+      <div class="chart-info" id="chartInfo">Touchez ou survolez le graphique pour voir les valeurs</div>
     </div>
 
     <div class="card" id="statsCard">
@@ -548,7 +556,7 @@
 </div>
 
 <script>
-const APP_VERSION = '1.1.6';
+const APP_VERSION = '1.1.7';
 
 // ===== DATA =====
 // Users & measures live ONLY in Google Drive.
@@ -654,96 +662,40 @@ const centileLabelPlugin = {
   }
 };
 
-const customLegendPlugin = {
-  id: 'customLegend',
-  afterDraw(chart) {
-    const ctx = chart.ctx;
-    const { right, bottom } = chart.chartArea;
+// Infobulle remplacée par un bandeau fixe sous le graphique (mobile et PC)
+const CHART_INFO_HINT = 'Touchez ou survolez le graphique pour voir les valeurs';
 
-    const items = chart.data.datasets.filter(ds =>
-      ds.label &&
-      !ds.label.startsWith('(réf)') &&
-      !ds.label.startsWith('_') &&
-      !ds.label.startsWith('Projection')
-    );
-    if (items.length === 0) return;
-
-    const lineW = 22;
-    const pad = 10;
-    const rowH = 20;
-    const fontSize = 11;
-    const fontFace = `${fontSize}px DM Sans, sans-serif`;
-
-    ctx.save();
-    ctx.font = fontFace;
-
-    const maxTextW = Math.max(...items.map(ds => ctx.measureText(ds.label).width));
-    const boxW = pad + lineW + 6 + maxTextW + pad;
-    const boxH = pad + items.length * rowH + pad - 4;
-
-    const bx = right - boxW - 8;
-    const by = bottom - boxH - 8;
-
-    ctx.fillStyle = 'rgba(255,253,247,0.88)';
-    ctx.strokeStyle = '#d8cdb8';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(bx, by, boxW, boxH, 6);
-    ctx.fill();
-    ctx.stroke();
-
-    items.forEach((ds, i) => {
-      const y = by + pad + i * rowH + rowH / 2 - 2;
-      const lx = bx + pad;
-
-      ctx.strokeStyle = ds.borderColor;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(lx, y);
-      ctx.lineTo(lx + lineW, y);
-      ctx.stroke();
-
-      ctx.fillStyle = '#2a1f0e';
-      ctx.font = fontFace;
-      ctx.textBaseline = 'middle';
-      ctx.textAlign = 'left';
-      ctx.fillText(ds.label, lx + lineW + 6, y);
-    });
-
-    ctx.restore();
-  }
-};
-
-// Sur mobile : l'infobulle flottante est remplacée par un bandeau fixe sous le graphique
-const mobileMQ = window.matchMedia('(max-width: 768px)');
-const CHART_INFO_HINT = 'Touchez le graphique pour voir les valeurs';
-
-function mobileChartInfo({ tooltip }) {
+function chartInfoBar({ tooltip }) {
   const box = document.getElementById('chartInfo');
-  if (!box || !mobileMQ.matches) return;
+  if (!box) return;
   const pts = tooltip.dataPoints;
-  if (tooltip.opacity === 0 || !pts || !pts.length) return; // le bandeau reste affiché
+  if (tooltip.opacity === 0 || !pts || !pts.length) return; // le bandeau garde la dernière valeur
   const age = String(Math.round(pts[0].parsed.x * 10) / 10).replace('.', ',');
   box.innerHTML = '<b>' + age + ' ans</b> · ' + pts.map(p =>
     '<span class="ci-row"><span class="ci-dot" style="background:' + p.dataset.borderColor + '"></span>' +
     p.dataset.label + ' : <b>' + p.parsed.y + ' cm</b></span>').join('');
 }
 
+// Légende HTML sous le graphique (ne recouvre plus les courbes)
+function renderChartLegend() {
+  const el = document.getElementById('chartLegend');
+  if (!el || !chart) return;
+  el.innerHTML = chart.data.datasets
+    .filter(ds => ds.label && !ds.label.startsWith('(réf)') && !ds.label.startsWith('_') && !ds.label.startsWith('Projection'))
+    .map(ds => '<span class="cl-item"><span class="cl-line" style="border-color:' + ds.borderColor + '"></span>' +
+      ds.label.replace(/</g, '&lt;') + '</span>').join('');
+}
+
 document.addEventListener('pointerdown', e => {
   const box = document.getElementById('chartInfo');
   if (box && e.target.id !== 'growthChart') box.textContent = CHART_INFO_HINT;
-});
-mobileMQ.addEventListener('change', () => {
-  if (!chart) return;
-  chart.options.plugins.tooltip.enabled = !mobileMQ.matches;
-  chart.update();
 });
 
 function initChart() {
   const ctx = document.getElementById('growthChart').getContext('2d');
   chart = new Chart(ctx, {
     type: 'line',
-    plugins: [centileLabelPlugin, customLegendPlugin],
+    plugins: [centileLabelPlugin],
     data: { datasets: [] },
     options: {
       responsive: true,
@@ -752,8 +704,8 @@ function initChart() {
       plugins: {
         legend: { display: false },
         tooltip: {
-          enabled: !mobileMQ.matches,
-          external: mobileChartInfo,
+          enabled: false,
+          external: chartInfoBar,
           filter: (item) => !item.dataset.label.includes('(réf)') && !item.dataset.label.startsWith('_'),
           itemSort: (a, b) => b.parsed.y - a.parsed.y,
           callbacks: {
@@ -928,6 +880,7 @@ function updateChart() {
 
   chart.data.datasets = datasets;
   chart.update();
+  renderChartLegend();
 }
 
 // ===== UI RENDERING =====
