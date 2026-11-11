@@ -193,6 +193,24 @@
   .measures-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); }
   .measures-table tr:hover td { background: var(--bg); }
 
+  .chart-info { display: none; }
+  @media (max-width: 768px) {
+    .chart-info {
+      display: block;
+      margin-top: 8px;
+      padding: 8px 12px;
+      min-height: 2.6em;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.82rem;
+      color: var(--text2);
+    }
+    .chart-info b { color: var(--text); }
+    .chart-info .ci-row { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; }
+    .chart-info .ci-dot { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  }
+
   .tag {
     display: inline-block;
     padding: 2px 8px;
@@ -414,6 +432,7 @@
       <div class="chart-wrap">
         <canvas id="growthChart"></canvas>
       </div>
+      <div class="chart-info" id="chartInfo">Touchez le graphique pour voir les valeurs</div>
     </div>
 
     <div class="card" id="statsCard">
@@ -695,6 +714,31 @@ const customLegendPlugin = {
   }
 };
 
+// Sur mobile : l'infobulle flottante est remplacée par un bandeau fixe sous le graphique
+const mobileMQ = window.matchMedia('(max-width: 768px)');
+const CHART_INFO_HINT = 'Touchez le graphique pour voir les valeurs';
+
+function mobileChartInfo({ tooltip }) {
+  const box = document.getElementById('chartInfo');
+  if (!box || !mobileMQ.matches) return;
+  const pts = tooltip.dataPoints;
+  if (tooltip.opacity === 0 || !pts || !pts.length) return; // le bandeau reste affiché
+  const age = String(Math.round(pts[0].parsed.x * 10) / 10).replace('.', ',');
+  box.innerHTML = '<b>' + age + ' ans</b> · ' + pts.map(p =>
+    '<span class="ci-row"><span class="ci-dot" style="background:' + p.dataset.borderColor + '"></span>' +
+    p.dataset.label + ' : <b>' + p.parsed.y + ' cm</b></span>').join('');
+}
+
+document.addEventListener('pointerdown', e => {
+  const box = document.getElementById('chartInfo');
+  if (box && e.target.id !== 'growthChart') box.textContent = CHART_INFO_HINT;
+});
+mobileMQ.addEventListener('change', () => {
+  if (!chart) return;
+  chart.options.plugins.tooltip.enabled = !mobileMQ.matches;
+  chart.update();
+});
+
 function initChart() {
   const ctx = document.getElementById('growthChart').getContext('2d');
   chart = new Chart(ctx, {
@@ -708,6 +752,8 @@ function initChart() {
       plugins: {
         legend: { display: false },
         tooltip: {
+          enabled: !mobileMQ.matches,
+          external: mobileChartInfo,
           filter: (item) => !item.dataset.label.includes('(réf)') && !item.dataset.label.startsWith('_'),
           itemSort: (a, b) => b.parsed.y - a.parsed.y,
           callbacks: {
